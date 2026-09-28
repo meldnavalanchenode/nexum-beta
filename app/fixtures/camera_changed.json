@@ -1,0 +1,32 @@
+{
+  "name": "camera moved to another I2C bus",
+  "configXml": "<Robot type=\"FirstInspires-FTC\"><LynxUsbDevice name=\"P\" serialNumber=\"X\" parentModuleAddress=\"173\"><LynxModule name=\"Control Hub\" port=\"173\"><goBILDA5202SeriesMotor name=\"drive\" port=\"0\" /><Servo name=\"gripper\" port=\"1\" /><HuskyLens name=\"camera\" port=\"0\" bus=\"2\" /></LynxModule></LynxUsbDevice></Robot>",
+  "files": [
+    {
+      "name": "Demo.java",
+      "content": "class Demo { void init(HardwareMap hardwareMap) { m = hardwareMap.get(DcMotor.class, \"drive\"); g = hardwareMap.get(Servo.class, \"gripper\"); c = hardwareMap.get(HuskyLens.class, \"camera\"); } }"
+    }
+  ],
+  "robotReport": {
+    "physyncRobot": 1,
+    "hubs": [
+      {
+        "address": 173,
+        "parent": true,
+        "firmware": "HW: 20, Maj: 1, Min: 8, Eng: 2",
+        "volts": 12.8
+      }
+    ],
+    "sensors": [
+      {
+        "name": "camera",
+        "type": "HuskyLens",
+        "class": "i2c",
+        "read": "ok",
+        "value": "blocks=2",
+        "livenessDeterminable": true
+      }
+    ],
+    "deviceCount": 4
+  }
+}

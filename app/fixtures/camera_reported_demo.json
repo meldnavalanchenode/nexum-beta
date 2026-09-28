@@ -1,0 +1,27 @@
+{
+  "name": "CONTROLLED DEMO — camera re-aim arc (SIMULATED data; none of this is real-hardware evidence)",
+  "simulated": true,
+  "note": "Drives the human-reported-change workflow end to end in a sandbox: verified state with camera evidence → a person reports the mount was re-aimed → proposed camera-pose rules do nothing → a named approval activates them → calibration + localization appear as required → fresh results satisfy them → a new state closes the loop. Every name in here says Demo on purpose.",
+  "configXml": "<Robot type=\"FirstInspires-FTC\"><LynxUsbDevice name=\"P\" serialNumber=\"X\" parentModuleAddress=\"173\"><LynxModule name=\"Control Hub\" port=\"173\"><goBILDA5202SeriesMotor name=\"drive\" port=\"0\" /><HuskyLens name=\"camera\" port=\"0\" bus=\"1\" /></LynxModule></LynxUsbDevice></Robot>",
+  "files": [
+    {
+      "name": "DemoAuto.java",
+      "content": "class DemoAuto { void init(HardwareMap hardwareMap) { m = hardwareMap.get(DcMotor.class, \"drive\"); c = hardwareMap.get(HuskyLens.class, \"camera\"); } }"
+    }
+  ],
+  "tests": [
+    {
+      "id": "camera-pose",
+      "kind": "validation",
+      "label": "camera pose calibration (DEMO)",
+      "definedBy": "Demo Mentor (simulated)"
+    },
+    {
+      "id": "localization",
+      "kind": "validation",
+      "label": "field localization through the camera (DEMO)",
+      "threshold": { "min": 0.9 },
+      "definedBy": "Demo Mentor (simulated)"
+    }
+  ]
+}

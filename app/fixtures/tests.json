@@ -1,0 +1,58 @@
+{
+  "tests": [
+    {
+      "id": "object-detection",
+      "kind": "validation",
+      "label": "Object detection",
+      "threshold": {
+        "min": 0.95
+      },
+      "definedBy": "demo-fixture"
+    },
+    {
+      "id": "low-light",
+      "kind": "robustness",
+      "label": "Low-light detection",
+      "threshold": {
+        "min": 0.9
+      },
+      "definedBy": "demo-fixture"
+    },
+    {
+      "id": "reflective",
+      "kind": "robustness",
+      "label": "Reflective objects",
+      "threshold": {
+        "min": 0.9
+      },
+      "definedBy": "demo-fixture"
+    },
+    {
+      "id": "grasp-standard",
+      "kind": "validation",
+      "label": "Standard grasp",
+      "threshold": {
+        "min": 0.95
+      },
+      "definedBy": "demo-fixture"
+    },
+    {
+      "id": "grasp-slippery",
+      "kind": "robustness",
+      "label": "Slippery-object grasp",
+      "threshold": {
+        "min": 0.85
+      },
+      "definedBy": "demo-fixture"
+    },
+    {
+      "id": "grasp-heavy",
+      "kind": "robustness",
+      "label": "Heavy-object grasp",
+      "threshold": {
+        "min": 0.9
+      },
+      "definedBy": "demo-fixture"
+    }
+  ]
+}

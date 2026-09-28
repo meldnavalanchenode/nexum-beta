@@ -1,0 +1,54 @@
+{
+  "edges": [
+    {
+      "id": "demo-cam-cal",
+      "from": "device:camera",
+      "to": "calibration:C7",
+      "source": "user-approved",
+      "approvedBy": "demo-fixture",
+      "note": "camera mounting/bus binds calibration C7"
+    },
+    {
+      "id": "demo-cal-od",
+      "from": "calibration:C7",
+      "to": "test:object-detection",
+      "source": "user-approved",
+      "approvedBy": "demo-fixture"
+    },
+    {
+      "id": "demo-cal-ll",
+      "from": "calibration:C7",
+      "to": "test:low-light",
+      "source": "user-approved",
+      "approvedBy": "demo-fixture"
+    },
+    {
+      "id": "demo-cal-rf",
+      "from": "calibration:C7",
+      "to": "test:reflective",
+      "source": "user-approved",
+      "approvedBy": "demo-fixture"
+    },
+    {
+      "id": "demo-grip-std",
+      "from": "device:gripper",
+      "to": "test:grasp-standard",
+      "source": "user-approved",
+      "approvedBy": "demo-fixture"
+    },
+    {
+      "id": "demo-grip-slp",
+      "from": "device:gripper",
+      "to": "test:grasp-slippery",
+      "source": "user-approved",
+      "approvedBy": "demo-fixture"
+    },
+    {
+      "id": "demo-grip-hvy",
+      "from": "device:gripper",
+      "to": "test:grasp-heavy",
+      "source": "user-approved",
+      "approvedBy": "demo-fixture"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+class T { void init(HardwareMap hardwareMap){ l=hardwareMap.get(DcMotor.class,"left_drive"); r=hardwareMap.get(DcMotor.class,"right_drive"); c=hardwareMap.get(Servo.class,"claw"); } }

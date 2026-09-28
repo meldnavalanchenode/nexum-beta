@@ -1,0 +1,15 @@
+{
+  "_readme": "EXAMPLE tolerances for the two physical fingerprints PhysyncPreflight v1.3 captures. Copy to your workspace's .physync/fingerprints.json and CHANGE THE NUMBERS AND THE NAME: a tolerance is an engineering decision about YOUR robot's noise floor, and PHYSYNC refuses to invent it. tolerance values are max |delta| per key (0 = exact match required); {\"angleDeg\": n} compares {x,y,z} values as a 3D angle instead.",
+  "defs": [
+    {
+      "id": "imu-gravity",
+      "tolerance": { "pitchDeg": 2, "rollDeg": 2 },
+      "definedBy": "REPLACE-WITH-YOUR-NAME (example values, not advice)"
+    },
+    {
+      "id": "camera-pose:Webcam-1",
+      "tolerance": { "tagId": 0, "rangeIn": 2, "bearingDeg": 2, "yawDeg": 2 },
+      "definedBy": "REPLACE-WITH-YOUR-NAME (example values, not advice)"
+    }
+  ]
+}

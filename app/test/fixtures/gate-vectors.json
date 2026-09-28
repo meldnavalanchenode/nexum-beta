@@ -1,0 +1,1430 @@
+{
+  "format": "physync-gate-v1",
+  "purpose": "Cross-language contract for PhysyncGate.java. On first hardware run, compute canonicalStateText+sha256 for each state in Java and compare — all 60 must match before the gate may be trusted.",
+  "vectors": [
+    {
+      "state": {
+        "configName": "robot",
+        "configSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "hubs": []
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:robot\nconfig-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stateDigest": "96faa1e58c1062be09e0895325feb65c2ee9ed177e1dad2ae6308b69fa8804e9"
+    },
+    {
+      "state": {
+        "configName": "robot",
+        "configSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "hubs": [
+          {
+            "address": 173,
+            "firmware": "1.8.2"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:robot\nconfig-sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nhub:173:1.8.2",
+      "stateDigest": "ec063e163aef8dcfcfb0d81fd524c07f14b1256f05b8adfb3fec016503776e4a"
+    },
+    {
+      "state": {
+        "configName": "my:config",
+        "configSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "hubs": [
+          {
+            "address": 1,
+            "firmware": "v: 1: 2"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:my:config\nconfig-sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\nhub:1:v: 1: 2",
+      "stateDigest": "d536bae3648185bd2916948fe076dfef57813b4c1a954152b50e352c5eb4dcb0"
+    },
+    {
+      "state": {
+        "configName": "práctica ローバー",
+        "configSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "hubs": [
+          {
+            "address": 2,
+            "firmware": "fw-β rev 7"
+          },
+          {
+            "address": 254,
+            "firmware": ""
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica ローバー\nconfig-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nhub:2:fw-β rev 7\nhub:254:",
+      "stateDigest": "88933f195f24350964c6fc7dc98935c484ad6be5192b298b33096146f0af4003"
+    },
+    {
+      "state": {
+        "configName": "a",
+        "configSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "hubs": [
+          {
+            "address": 255,
+            "firmware": "x"
+          },
+          {
+            "address": 1,
+            "firmware": "y"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:a\nconfig-sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\nhub:1:y\nhub:255:x",
+      "stateDigest": "4ad7ef39e7d3f7ac14b43b35ba200971f4990a7e05e3a2d03a3060c7dfca9658"
+    },
+    {
+      "state": {
+        "configName": "2026_biobuzz",
+        "configSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "hubs": [
+          {
+            "address": 100,
+            "firmware": "1.8.2"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:2026_biobuzz\nconfig-sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\nhub:100:1.8.2",
+      "stateDigest": "6df8628d5596500baf131c0b28d8f087deac438c5af792a6b94181949d1c7caa"
+    },
+    {
+      "state": {
+        "configName": "v2.final.FINAL",
+        "configSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "hubs": [
+          {
+            "address": 10,
+            "firmware": "spaced out fw 3"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:v2.final.FINAL\nconfig-sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nhub:10:spaced out fw 3",
+      "stateDigest": "9b282a3003a1c8edd535c7032c2d6a10cffd1b2bde78828c4526cf12efff41eb"
+    },
+    {
+      "state": {
+        "configName": "bot 2",
+        "configSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "hubs": [
+          {
+            "address": 3,
+            "firmware": "Maj: 1, Min: 8"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:bot 2\nconfig-sha256:1111111111111111111111111111111111111111111111111111111111111111\nhub:3:Maj: 1, Min: 8",
+      "stateDigest": "0cb87608661347caa77a98a99c034a16035c66df1b23c5ce18216e1f286c9fa0"
+    },
+    {
+      "state": {
+        "configName": "práctica85",
+        "configSha256": "9ec6aec18e649ef57b1c906b7b25e574ae90ddbe2bd2a74c93b70db71b191ba1",
+        "hubs": [
+          {
+            "address": 126,
+            "firmware": "2.7.4"
+          },
+          {
+            "address": 130,
+            "firmware": "Maj: 9, Min: 9"
+          },
+          {
+            "address": 139,
+            "firmware": "Maj: 4, Min: 4"
+          },
+          {
+            "address": 162,
+            "firmware": "spaced out fw 8"
+          },
+          {
+            "address": 218,
+            "firmware": "8.6.8"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica85\nconfig-sha256:9ec6aec18e649ef57b1c906b7b25e574ae90ddbe2bd2a74c93b70db71b191ba1\nhub:126:2.7.4\nhub:130:Maj: 9, Min: 9\nhub:139:Maj: 4, Min: 4\nhub:162:spaced out fw 8\nhub:218:8.6.8",
+      "stateDigest": "38aed9d4e82261c37634f4f4341921b74cdcab685f21f75b4ecfd0dfcaf34441"
+    },
+    {
+      "state": {
+        "configName": "bot 2",
+        "configSha256": "969493d38598532f63cfd2949b39cefbb6be1d7f0e84e30f158339e408e45273",
+        "hubs": [
+          {
+            "address": 94,
+            "firmware": "Maj: 3, Min: 4"
+          },
+          {
+            "address": 129,
+            "firmware": "spaced out fw 1"
+          },
+          {
+            "address": 134,
+            "firmware": "fw-4 rev 16"
+          },
+          {
+            "address": 163,
+            "firmware": "6.7.26"
+          },
+          {
+            "address": 213,
+            "firmware": "Maj: 9, Min: 8"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:bot 2\nconfig-sha256:969493d38598532f63cfd2949b39cefbb6be1d7f0e84e30f158339e408e45273\nhub:94:Maj: 3, Min: 4\nhub:129:spaced out fw 1\nhub:134:fw-4 rev 16\nhub:163:6.7.26\nhub:213:Maj: 9, Min: 8",
+      "stateDigest": "8ea4d68a9e9e98935c897dcb69d8d220b77450d330134e519733be4df6d0cde9"
+    },
+    {
+      "state": {
+        "configName": "ローバー",
+        "configSha256": "e5097eb3fcc10df72bf7b4b0afc62136bb39d7ba73a965726091c8e639934e75",
+        "hubs": [
+          {
+            "address": 46,
+            "firmware": "8.19.24"
+          },
+          {
+            "address": 59,
+            "firmware": "Maj: 5, Min: 7"
+          },
+          {
+            "address": 96,
+            "firmware": "2.10.21"
+          },
+          {
+            "address": 127,
+            "firmware": "6.20.5"
+          },
+          {
+            "address": 213,
+            "firmware": "fw-0β rev 16"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:ローバー\nconfig-sha256:e5097eb3fcc10df72bf7b4b0afc62136bb39d7ba73a965726091c8e639934e75\nhub:46:8.19.24\nhub:59:Maj: 5, Min: 7\nhub:96:2.10.21\nhub:127:6.20.5\nhub:213:fw-0β rev 16",
+      "stateDigest": "3e68cfc8613c15dca7975e65a28cd2ba50a21907113bda28d5172e82a4f91f96"
+    },
+    {
+      "state": {
+        "configName": "a48",
+        "configSha256": "a800da2ddfd071a87dee75c16c1fb7d4f38a83b57adc2d917b353d5f70a02d47",
+        "hubs": [
+          {
+            "address": 250,
+            "firmware": "spaced out fw 3"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:a48\nconfig-sha256:a800da2ddfd071a87dee75c16c1fb7d4f38a83b57adc2d917b353d5f70a02d47\nhub:250:spaced out fw 3",
+      "stateDigest": "ed4cdb955c719a6be6888702b1f7268bedb0a1951bda703bed36412312cee660"
+    },
+    {
+      "state": {
+        "configName": "a",
+        "configSha256": "a396c13b5be76564c09e6818295dc65398e95909ca0efb33e902c793a8e39ddc",
+        "hubs": [
+          {
+            "address": 234,
+            "firmware": "5.11.12"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:a\nconfig-sha256:a396c13b5be76564c09e6818295dc65398e95909ca0efb33e902c793a8e39ddc\nhub:234:5.11.12",
+      "stateDigest": "d03f33a274e9c9b184a366ad20d655618efe345b4ec4495dc6852a13899fb323"
+    },
+    {
+      "state": {
+        "configName": "práctica97",
+        "configSha256": "4e17c162dbc1ef1a0d5b9656b5a670a89ce1c68fdca56dcb7ff029a054aa476e",
+        "hubs": [
+          {
+            "address": 20,
+            "firmware": "fw-3 rev 17"
+          },
+          {
+            "address": 147,
+            "firmware": "9.4.25"
+          },
+          {
+            "address": 180,
+            "firmware": "0.2.2"
+          },
+          {
+            "address": 209,
+            "firmware": "9.12.16"
+          },
+          {
+            "address": 254,
+            "firmware": "7.17.1"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica97\nconfig-sha256:4e17c162dbc1ef1a0d5b9656b5a670a89ce1c68fdca56dcb7ff029a054aa476e\nhub:20:fw-3 rev 17\nhub:147:9.4.25\nhub:180:0.2.2\nhub:209:9.12.16\nhub:254:7.17.1",
+      "stateDigest": "15c497ad4fdfbf955ab1e7139c37dfcb4a099d1923c586798074f9692866a0ec"
+    },
+    {
+      "state": {
+        "configName": "2026_biobuzz25",
+        "configSha256": "34f92862fba4e74267f9e835a680b6d885a039f07f5a569a2cfb6beaf8561025",
+        "hubs": [
+          {
+            "address": 38,
+            "firmware": "Maj: 6, Min: 1"
+          },
+          {
+            "address": 149,
+            "firmware": "fw-1ββ rev 16"
+          },
+          {
+            "address": 157,
+            "firmware": "7.4.9"
+          },
+          {
+            "address": 198,
+            "firmware": "spaced out fw 9"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:2026_biobuzz25\nconfig-sha256:34f92862fba4e74267f9e835a680b6d885a039f07f5a569a2cfb6beaf8561025\nhub:38:Maj: 6, Min: 1\nhub:149:fw-1ββ rev 16\nhub:157:7.4.9\nhub:198:spaced out fw 9",
+      "stateDigest": "571caad12ed8ac46bc0aeaca1bdb3baa8cf1494f2afa77ce9b9755f52564dfd7"
+    },
+    {
+      "state": {
+        "configName": "ローバー8",
+        "configSha256": "105ca21e38406a2133db9f6578edb6606dcaf20655ef02e22db328844e72fdca",
+        "hubs": [
+          {
+            "address": 37,
+            "firmware": "spaced out fw 1"
+          },
+          {
+            "address": 57,
+            "firmware": "8.9.2"
+          },
+          {
+            "address": 84,
+            "firmware": "spaced out fw 7"
+          },
+          {
+            "address": 178,
+            "firmware": "8.13.19"
+          },
+          {
+            "address": 199,
+            "firmware": "9.13.2"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:ローバー8\nconfig-sha256:105ca21e38406a2133db9f6578edb6606dcaf20655ef02e22db328844e72fdca\nhub:37:spaced out fw 1\nhub:57:8.9.2\nhub:84:spaced out fw 7\nhub:178:8.13.19\nhub:199:9.13.2",
+      "stateDigest": "50e8f501375cc71c2d842f02c6170c8854a2364977ef000a3f824eefc8f29573"
+    },
+    {
+      "state": {
+        "configName": "CompBot",
+        "configSha256": "c57b8984472926c8925ab6db2d3e96c872ab85e332b82e292ece3552a23c6462",
+        "hubs": [
+          {
+            "address": 101,
+            "firmware": "4.3.14"
+          },
+          {
+            "address": 168,
+            "firmware": "3.15.7"
+          },
+          {
+            "address": 175,
+            "firmware": "9.6.23"
+          },
+          {
+            "address": 214,
+            "firmware": "Maj: 7, Min: 5"
+          },
+          {
+            "address": 247,
+            "firmware": "6.13.6"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:CompBot\nconfig-sha256:c57b8984472926c8925ab6db2d3e96c872ab85e332b82e292ece3552a23c6462\nhub:101:4.3.14\nhub:168:3.15.7\nhub:175:9.6.23\nhub:214:Maj: 7, Min: 5\nhub:247:6.13.6",
+      "stateDigest": "bc77efc40e436d2725a31b3eae7e16126fafb1e324c9e54fc9ec9431aebd4ce4"
+    },
+    {
+      "state": {
+        "configName": "my:config",
+        "configSha256": "eb1fb65070a9ffe9c50d07c05c0fd610d909749718265ca5a127616bd52abee8",
+        "hubs": [
+          {
+            "address": 14,
+            "firmware": "spaced out fw 4"
+          },
+          {
+            "address": 24,
+            "firmware": "spaced out fw 1"
+          },
+          {
+            "address": 64,
+            "firmware": "fw-6β rev 21"
+          },
+          {
+            "address": 77,
+            "firmware": "fw-7ββ rev 27"
+          },
+          {
+            "address": 100,
+            "firmware": "Maj: 4, Min: 10"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:my:config\nconfig-sha256:eb1fb65070a9ffe9c50d07c05c0fd610d909749718265ca5a127616bd52abee8\nhub:14:spaced out fw 4\nhub:24:spaced out fw 1\nhub:64:fw-6β rev 21\nhub:77:fw-7ββ rev 27\nhub:100:Maj: 4, Min: 10",
+      "stateDigest": "d9ff262c29b5a5decd60fc506fabc9f22ee6e1c7c6c198b74392d4bbc359ef61"
+    },
+    {
+      "state": {
+        "configName": "CompBot",
+        "configSha256": "5c1f8c99fb98d41b0cafe5748a9023adaa763ddedd09a09d7bf93662ac618f82",
+        "hubs": [
+          {
+            "address": 122,
+            "firmware": "5.0.4"
+          },
+          {
+            "address": 228,
+            "firmware": "9.20.28"
+          },
+          {
+            "address": 238,
+            "firmware": "Maj: 4, Min: 2"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:CompBot\nconfig-sha256:5c1f8c99fb98d41b0cafe5748a9023adaa763ddedd09a09d7bf93662ac618f82\nhub:122:5.0.4\nhub:228:9.20.28\nhub:238:Maj: 4, Min: 2",
+      "stateDigest": "fd486453d2297fb4da645ef5d6d03d67cdbfadb2052f3662bd206b6589bb1b39"
+    },
+    {
+      "state": {
+        "configName": "práctica",
+        "configSha256": "49352ea564c40250a342f10a9f5f51a3b8977a55576ba059b6ed29acdd96794d",
+        "hubs": [
+          {
+            "address": 21,
+            "firmware": "9.19.21"
+          },
+          {
+            "address": 191,
+            "firmware": "2.1.16"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica\nconfig-sha256:49352ea564c40250a342f10a9f5f51a3b8977a55576ba059b6ed29acdd96794d\nhub:21:9.19.21\nhub:191:2.1.16",
+      "stateDigest": "6b0779f3230f2df2d9e4ecedc4d59d5c4eb636b3659e442c38ebb45a558d6abb"
+    },
+    {
+      "state": {
+        "configName": "bot 2",
+        "configSha256": "31ef4148585d056e1f105988f877dff6ccf0e1788b023e3bb9088cecb8d5994e",
+        "hubs": [
+          {
+            "address": 33,
+            "firmware": "Maj: 7, Min: 13"
+          },
+          {
+            "address": 38,
+            "firmware": "fw-2ββ rev 8"
+          },
+          {
+            "address": 73,
+            "firmware": "Maj: 0, Min: 14"
+          },
+          {
+            "address": 107,
+            "firmware": "5.4.16"
+          },
+          {
+            "address": 139,
+            "firmware": "6.11.17"
+          },
+          {
+            "address": 214,
+            "firmware": "2.6.8"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:bot 2\nconfig-sha256:31ef4148585d056e1f105988f877dff6ccf0e1788b023e3bb9088cecb8d5994e\nhub:33:Maj: 7, Min: 13\nhub:38:fw-2ββ rev 8\nhub:73:Maj: 0, Min: 14\nhub:107:5.4.16\nhub:139:6.11.17\nhub:214:2.6.8",
+      "stateDigest": "696da7fd7e94cbb477eb9a4458f43e911a795a52cadc22fe38abf7e4c2c00512"
+    },
+    {
+      "state": {
+        "configName": "práctica",
+        "configSha256": "bbcb1b410bd4b86f117b1c3ffc77a2f0bb2579d065f50e2b69d7e699faffa131",
+        "hubs": [
+          {
+            "address": 7,
+            "firmware": "2.9.13"
+          },
+          {
+            "address": 30,
+            "firmware": "fw-3ββ rev 17"
+          },
+          {
+            "address": 122,
+            "firmware": "4.19.27"
+          },
+          {
+            "address": 173,
+            "firmware": "6.12.5"
+          },
+          {
+            "address": 218,
+            "firmware": "Maj: 0, Min: 1"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica\nconfig-sha256:bbcb1b410bd4b86f117b1c3ffc77a2f0bb2579d065f50e2b69d7e699faffa131\nhub:7:2.9.13\nhub:30:fw-3ββ rev 17\nhub:122:4.19.27\nhub:173:6.12.5\nhub:218:Maj: 0, Min: 1",
+      "stateDigest": "ad7ceeae13396ae1d929b90c38e376a39f8823a0f35adae5b27bf792e9d458cb"
+    },
+    {
+      "state": {
+        "configName": "ローバー0",
+        "configSha256": "6682e27dc5717883aeec856a8a044b585c7369c1be8de893cdc9e1c7f0e4faf4",
+        "hubs": [
+          {
+            "address": 69,
+            "firmware": "9.13.26"
+          },
+          {
+            "address": 101,
+            "firmware": "5.20.29"
+          },
+          {
+            "address": 158,
+            "firmware": "fw-9βββ rev 28"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:ローバー0\nconfig-sha256:6682e27dc5717883aeec856a8a044b585c7369c1be8de893cdc9e1c7f0e4faf4\nhub:69:9.13.26\nhub:101:5.20.29\nhub:158:fw-9βββ rev 28",
+      "stateDigest": "dc2d8ed786d0c114cc9711f75bcf698bdd2691f3b1fc8e467559684c2d0f4564"
+    },
+    {
+      "state": {
+        "configName": "my:config10",
+        "configSha256": "a7bff32c47a0302eff5912d5bd83007736ded7d8cbbba6004d1f5afa6f933008",
+        "hubs": []
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:my:config10\nconfig-sha256:a7bff32c47a0302eff5912d5bd83007736ded7d8cbbba6004d1f5afa6f933008",
+      "stateDigest": "1b6c159112c1e82253406ae5528bbd119919a54a8114d82e19a20a26f5509e90"
+    },
+    {
+      "state": {
+        "configName": "2026_biobuzz",
+        "configSha256": "09d5c51bf420e6f4fc18de98afe484e01cb8a8a31525636866e66b3f768ca2ab",
+        "hubs": [
+          {
+            "address": 8,
+            "firmware": "fw-8 rev 9"
+          },
+          {
+            "address": 19,
+            "firmware": "8.20.16"
+          },
+          {
+            "address": 146,
+            "firmware": "9.4.28"
+          },
+          {
+            "address": 176,
+            "firmware": "fw-1β rev 8"
+          },
+          {
+            "address": 192,
+            "firmware": "4.20.9"
+          },
+          {
+            "address": 226,
+            "firmware": "spaced out fw 1"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:2026_biobuzz\nconfig-sha256:09d5c51bf420e6f4fc18de98afe484e01cb8a8a31525636866e66b3f768ca2ab\nhub:8:fw-8 rev 9\nhub:19:8.20.16\nhub:146:9.4.28\nhub:176:fw-1β rev 8\nhub:192:4.20.9\nhub:226:spaced out fw 1",
+      "stateDigest": "8c7ed1c1a5922f0c177953b0d743c5a9725ac1b2cdb799310be0c4fd1a6e92ae"
+    },
+    {
+      "state": {
+        "configName": "robot",
+        "configSha256": "ac032895990f139e10e859e8ea47b00ae2468e842287f4a8fa4f5123699b5c34",
+        "hubs": [
+          {
+            "address": 83,
+            "firmware": "Maj: 4, Min: 6"
+          },
+          {
+            "address": 134,
+            "firmware": "8.10.19"
+          },
+          {
+            "address": 179,
+            "firmware": "6.5.17"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:robot\nconfig-sha256:ac032895990f139e10e859e8ea47b00ae2468e842287f4a8fa4f5123699b5c34\nhub:83:Maj: 4, Min: 6\nhub:134:8.10.19\nhub:179:6.5.17",
+      "stateDigest": "d504ddcd754162a089ade0c38f13fdf5ebbf972a07637551fa5d9c7c4e96b382"
+    },
+    {
+      "state": {
+        "configName": "práctica77",
+        "configSha256": "4118649bfeed0c1517d1d269abdf6fe25df2fe8c686dfc0dba9d64bebfaf19cf",
+        "hubs": [
+          {
+            "address": 91,
+            "firmware": "8.11.14"
+          },
+          {
+            "address": 115,
+            "firmware": "spaced out fw 7"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica77\nconfig-sha256:4118649bfeed0c1517d1d269abdf6fe25df2fe8c686dfc0dba9d64bebfaf19cf\nhub:91:8.11.14\nhub:115:spaced out fw 7",
+      "stateDigest": "e06d2a72114d630af85723016433c309dd761e2498f31e4d76bc93a881642ae5"
+    },
+    {
+      "state": {
+        "configName": "práctica",
+        "configSha256": "7c895c6f7fd2840dbf8c0ca1a1cb6d6aa7b3659c74244079a2bd72201fe047da",
+        "hubs": [
+          {
+            "address": 44,
+            "firmware": "Maj: 2, Min: 7"
+          },
+          {
+            "address": 91,
+            "firmware": "Maj: 9, Min: 1"
+          },
+          {
+            "address": 211,
+            "firmware": "Maj: 2, Min: 6"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica\nconfig-sha256:7c895c6f7fd2840dbf8c0ca1a1cb6d6aa7b3659c74244079a2bd72201fe047da\nhub:44:Maj: 2, Min: 7\nhub:91:Maj: 9, Min: 1\nhub:211:Maj: 2, Min: 6",
+      "stateDigest": "b91864ff16132e427d03d384933887ccd772968488db691cac68d1c6f82be8e7"
+    },
+    {
+      "state": {
+        "configName": "a",
+        "configSha256": "10b7b810f87189cf29ce58ebb3f2335f48cfc28eed6cb3ec5f21632ae694f485",
+        "hubs": [
+          {
+            "address": 9,
+            "firmware": "spaced out fw 8"
+          },
+          {
+            "address": 180,
+            "firmware": "9.8.28"
+          },
+          {
+            "address": 213,
+            "firmware": "4.2.12"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:a\nconfig-sha256:10b7b810f87189cf29ce58ebb3f2335f48cfc28eed6cb3ec5f21632ae694f485\nhub:9:spaced out fw 8\nhub:180:9.8.28\nhub:213:4.2.12",
+      "stateDigest": "cd436901477c9ad0aa9366896c40c72342c623fede92d506c1aeb38dbbfb8178"
+    },
+    {
+      "state": {
+        "configName": "robot4",
+        "configSha256": "beb14fc72dda8de5648648c855400f7060f5610ae66da805fe00f1a2321a4bd7",
+        "hubs": [
+          {
+            "address": 87,
+            "firmware": "fw-7β rev 27"
+          },
+          {
+            "address": 96,
+            "firmware": "0.6.12"
+          },
+          {
+            "address": 141,
+            "firmware": "4.10.18"
+          },
+          {
+            "address": 143,
+            "firmware": "spaced out fw 7"
+          },
+          {
+            "address": 145,
+            "firmware": "spaced out fw 1"
+          },
+          {
+            "address": 167,
+            "firmware": "7.18.8"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:robot4\nconfig-sha256:beb14fc72dda8de5648648c855400f7060f5610ae66da805fe00f1a2321a4bd7\nhub:87:fw-7β rev 27\nhub:96:0.6.12\nhub:141:4.10.18\nhub:143:spaced out fw 7\nhub:145:spaced out fw 1\nhub:167:7.18.8",
+      "stateDigest": "6c77c078e2bdf7b6e0c69bacf47bb6e239fd9488bdf616d31382375cf8db6a58"
+    },
+    {
+      "state": {
+        "configName": "ローバー35",
+        "configSha256": "78aab4eff516f949c80f50130f0590da61c7b98e70a2bce33e582e7433b5159d",
+        "hubs": [
+          {
+            "address": 59,
+            "firmware": "5.1.1"
+          },
+          {
+            "address": 61,
+            "firmware": "0.18.23"
+          },
+          {
+            "address": 62,
+            "firmware": "spaced out fw 9"
+          },
+          {
+            "address": 120,
+            "firmware": "Maj: 2, Min: 8"
+          },
+          {
+            "address": 212,
+            "firmware": "Maj: 1, Min: 6"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:ローバー35\nconfig-sha256:78aab4eff516f949c80f50130f0590da61c7b98e70a2bce33e582e7433b5159d\nhub:59:5.1.1\nhub:61:0.18.23\nhub:62:spaced out fw 9\nhub:120:Maj: 2, Min: 8\nhub:212:Maj: 1, Min: 6",
+      "stateDigest": "4f7f93f1cb4dab1502f721683407f2cfed1a1c5afebcc2efe4ae9f983213443a"
+    },
+    {
+      "state": {
+        "configName": "robot",
+        "configSha256": "a32a65ec325727d35236aac5d271826b3d28d1906beef2aa91cc4c47b8d3c489",
+        "hubs": [
+          {
+            "address": 55,
+            "firmware": "Maj: 2, Min: 6"
+          },
+          {
+            "address": 144,
+            "firmware": "5.5.0"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:robot\nconfig-sha256:a32a65ec325727d35236aac5d271826b3d28d1906beef2aa91cc4c47b8d3c489\nhub:55:Maj: 2, Min: 6\nhub:144:5.5.0",
+      "stateDigest": "7d624fda2a6c67fd3d11a5132e175a8bb9d8631ce3842a9deff17a8b71f6c775"
+    },
+    {
+      "state": {
+        "configName": "my:config",
+        "configSha256": "546d88708d62e9d59c9961a76e2a06b63ccabfe7b20859d8bbe56842bc903dad",
+        "hubs": [
+          {
+            "address": 19,
+            "firmware": "7.18.5"
+          },
+          {
+            "address": 78,
+            "firmware": "6.6.14"
+          },
+          {
+            "address": 97,
+            "firmware": "1.20.2"
+          },
+          {
+            "address": 130,
+            "firmware": "8.12.4"
+          },
+          {
+            "address": 147,
+            "firmware": "spaced out fw 1"
+          },
+          {
+            "address": 165,
+            "firmware": "spaced out fw 7"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:my:config\nconfig-sha256:546d88708d62e9d59c9961a76e2a06b63ccabfe7b20859d8bbe56842bc903dad\nhub:19:7.18.5\nhub:78:6.6.14\nhub:97:1.20.2\nhub:130:8.12.4\nhub:147:spaced out fw 1\nhub:165:spaced out fw 7",
+      "stateDigest": "4f19a2600180fe1ef07e407b3e8ed1e00dd3086deba6b40f6f4af8109ffda98a"
+    },
+    {
+      "state": {
+        "configName": "práctica",
+        "configSha256": "0857683c588403e00c53db4e48582eb3b9c67cc8d62775acb0c95049bc747dd5",
+        "hubs": [
+          {
+            "address": 53,
+            "firmware": "6.13.21"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica\nconfig-sha256:0857683c588403e00c53db4e48582eb3b9c67cc8d62775acb0c95049bc747dd5\nhub:53:6.13.21",
+      "stateDigest": "cc660e334e33a7ad0f5e21dd24110df9f08ae9d03aac1dad92b2510d9914e242"
+    },
+    {
+      "state": {
+        "configName": "my:config76",
+        "configSha256": "53aa55edc97f43841d437070a08b395dfaf2ebb38c92f1d5ca96aa19ea9d6ca1",
+        "hubs": []
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:my:config76\nconfig-sha256:53aa55edc97f43841d437070a08b395dfaf2ebb38c92f1d5ca96aa19ea9d6ca1",
+      "stateDigest": "f75197435f7ec41aa852e1ab0c3a384ea7c47d6d0a449273361536060fe06ab1"
+    },
+    {
+      "state": {
+        "configName": "robot",
+        "configSha256": "2b5a7ecc3f78898eda705912b8a5b035104880f0d263762e4a6e38ea549f20bb",
+        "hubs": [
+          {
+            "address": 187,
+            "firmware": "Maj: 6, Min: 20"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:robot\nconfig-sha256:2b5a7ecc3f78898eda705912b8a5b035104880f0d263762e4a6e38ea549f20bb\nhub:187:Maj: 6, Min: 20",
+      "stateDigest": "f6bb8d19e29d7a281ea2a8f6b80f8e01c1efbd3918281e01ecf06c4c6c24a7fa"
+    },
+    {
+      "state": {
+        "configName": "bot 2",
+        "configSha256": "7dfe9009b7d7a8914d20b1945d108ca8c8a41aeba8091f14b223439906181a22",
+        "hubs": [
+          {
+            "address": 35,
+            "firmware": "Maj: 8, Min: 14"
+          },
+          {
+            "address": 143,
+            "firmware": "0.9.15"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:bot 2\nconfig-sha256:7dfe9009b7d7a8914d20b1945d108ca8c8a41aeba8091f14b223439906181a22\nhub:35:Maj: 8, Min: 14\nhub:143:0.9.15",
+      "stateDigest": "26a6f8a4a23e248394446872493de604163f410bcfa0623175094b3511be7a41"
+    },
+    {
+      "state": {
+        "configName": "my:config14",
+        "configSha256": "b8bbafef0fc324fe6eb4a45a2fdd7012c486a8491b9c869e3a388878baf9c60d",
+        "hubs": []
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:my:config14\nconfig-sha256:b8bbafef0fc324fe6eb4a45a2fdd7012c486a8491b9c869e3a388878baf9c60d",
+      "stateDigest": "8f78f71bd4e241432c03c4e1bb9c8ee867e6ce171e2b00d3a56616bbf3198636"
+    },
+    {
+      "state": {
+        "configName": "v2.final.FINAL",
+        "configSha256": "99038383a1d96b5dc79bf70eee7599cc3ae5cbe05aa18cac8323a89bde068787",
+        "hubs": [
+          {
+            "address": 29,
+            "firmware": "Maj: 7, Min: 16"
+          },
+          {
+            "address": 53,
+            "firmware": "spaced out fw 9"
+          },
+          {
+            "address": 114,
+            "firmware": "5.9.4"
+          },
+          {
+            "address": 154,
+            "firmware": "Maj: 8, Min: 6"
+          },
+          {
+            "address": 218,
+            "firmware": "fw-6β rev 15"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:v2.final.FINAL\nconfig-sha256:99038383a1d96b5dc79bf70eee7599cc3ae5cbe05aa18cac8323a89bde068787\nhub:29:Maj: 7, Min: 16\nhub:53:spaced out fw 9\nhub:114:5.9.4\nhub:154:Maj: 8, Min: 6\nhub:218:fw-6β rev 15",
+      "stateDigest": "1be5e74194a0f4f999ff5f64455528ade93f903037155ab2fb1cc6344429758c"
+    },
+    {
+      "state": {
+        "configName": "v2.final.FINAL",
+        "configSha256": "81f7b64e395e890dd967fbc276e975b90e44dceeb14c2b0915913eb01caf8cde",
+        "hubs": [
+          {
+            "address": 88,
+            "firmware": "spaced out fw 8"
+          },
+          {
+            "address": 97,
+            "firmware": "fw-1βββ rev 27"
+          },
+          {
+            "address": 106,
+            "firmware": "8.15.4"
+          },
+          {
+            "address": 136,
+            "firmware": "fw-5 rev 10"
+          },
+          {
+            "address": 148,
+            "firmware": "0.10.14"
+          },
+          {
+            "address": 176,
+            "firmware": "2.3.9"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:v2.final.FINAL\nconfig-sha256:81f7b64e395e890dd967fbc276e975b90e44dceeb14c2b0915913eb01caf8cde\nhub:88:spaced out fw 8\nhub:97:fw-1βββ rev 27\nhub:106:8.15.4\nhub:136:fw-5 rev 10\nhub:148:0.10.14\nhub:176:2.3.9",
+      "stateDigest": "da9bb8526393c1e0c542c3f04de276b12f6183861597ad592e4f84873c066712"
+    },
+    {
+      "state": {
+        "configName": "práctica",
+        "configSha256": "04edc29275345ba05ff26f3aef14c7eba38684d24136d675746517105ae3b180",
+        "hubs": [
+          {
+            "address": 135,
+            "firmware": "spaced out fw 1"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica\nconfig-sha256:04edc29275345ba05ff26f3aef14c7eba38684d24136d675746517105ae3b180\nhub:135:spaced out fw 1",
+      "stateDigest": "a5b019dd269b3f2fc3423a9d9b4dc4a4c46cc7375b674c2bbf956b6bd334c9be"
+    },
+    {
+      "state": {
+        "configName": "ローバー87",
+        "configSha256": "b84cdc18181ba047160db371aef49c2e1557e07419ae7bc2fac6eb9cf4ce0dbf",
+        "hubs": [
+          {
+            "address": 24,
+            "firmware": "3.17.15"
+          },
+          {
+            "address": 78,
+            "firmware": "spaced out fw 4"
+          },
+          {
+            "address": 117,
+            "firmware": "0.8.6"
+          },
+          {
+            "address": 159,
+            "firmware": "fw-3β rev 25"
+          },
+          {
+            "address": 193,
+            "firmware": "spaced out fw 5"
+          },
+          {
+            "address": 227,
+            "firmware": "spaced out fw 5"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:ローバー87\nconfig-sha256:b84cdc18181ba047160db371aef49c2e1557e07419ae7bc2fac6eb9cf4ce0dbf\nhub:24:3.17.15\nhub:78:spaced out fw 4\nhub:117:0.8.6\nhub:159:fw-3β rev 25\nhub:193:spaced out fw 5\nhub:227:spaced out fw 5",
+      "stateDigest": "6c822f3a4fe5f36fa54176d8a99e017cc195a7b739977976e5e8471fd03dd088"
+    },
+    {
+      "state": {
+        "configName": "v2.final.FINAL",
+        "configSha256": "c39c9aaf1ee7a06c8b877a89baff5a930071d84076f29ba5fd0fa17922a5a2a1",
+        "hubs": [
+          {
+            "address": 60,
+            "firmware": "2.9.13"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:v2.final.FINAL\nconfig-sha256:c39c9aaf1ee7a06c8b877a89baff5a930071d84076f29ba5fd0fa17922a5a2a1\nhub:60:2.9.13",
+      "stateDigest": "d725fed347619657a5c824b9c19ff33a1fe56c7483fca551a014b9618615584b"
+    },
+    {
+      "state": {
+        "configName": "práctica",
+        "configSha256": "b086789d21c4a13a549c5429e27fbf387629ddc487a8cf53c2e6259b6801384e",
+        "hubs": [
+          {
+            "address": 8,
+            "firmware": "9.18.30"
+          },
+          {
+            "address": 138,
+            "firmware": "2.8.20"
+          },
+          {
+            "address": 229,
+            "firmware": "fw-4βββ rev 10"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica\nconfig-sha256:b086789d21c4a13a549c5429e27fbf387629ddc487a8cf53c2e6259b6801384e\nhub:8:9.18.30\nhub:138:2.8.20\nhub:229:fw-4βββ rev 10",
+      "stateDigest": "d2850892bff1966bc99fdb8eaaab02c052c92a6493c7ff9234711901fe2e15ba"
+    },
+    {
+      "state": {
+        "configName": "bot 214",
+        "configSha256": "2977bc9ba1dc91d04788857f4146bfe7519eba7239883903b71b96fd8827f7c4",
+        "hubs": [
+          {
+            "address": 36,
+            "firmware": "6.9.28"
+          },
+          {
+            "address": 70,
+            "firmware": "fw-0β rev 17"
+          },
+          {
+            "address": 111,
+            "firmware": "spaced out fw 5"
+          },
+          {
+            "address": 249,
+            "firmware": "fw-4 rev 19"
+          },
+          {
+            "address": 250,
+            "firmware": "Maj: 5, Min: 0"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:bot 214\nconfig-sha256:2977bc9ba1dc91d04788857f4146bfe7519eba7239883903b71b96fd8827f7c4\nhub:36:6.9.28\nhub:70:fw-0β rev 17\nhub:111:spaced out fw 5\nhub:249:fw-4 rev 19\nhub:250:Maj: 5, Min: 0",
+      "stateDigest": "2a6e976bd976328338a569098d09060c2dcdd77b9af0753d0044e452c2da7f2f"
+    },
+    {
+      "state": {
+        "configName": "a",
+        "configSha256": "1e7ec0f8facd981168bd401b5ce84680f1f60a1148614c7cc47c7d916ddcaf9a",
+        "hubs": [
+          {
+            "address": 83,
+            "firmware": "9.4.27"
+          },
+          {
+            "address": 94,
+            "firmware": "4.19.10"
+          },
+          {
+            "address": 169,
+            "firmware": "fw-4 rev 20"
+          },
+          {
+            "address": 181,
+            "firmware": "spaced out fw 9"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:a\nconfig-sha256:1e7ec0f8facd981168bd401b5ce84680f1f60a1148614c7cc47c7d916ddcaf9a\nhub:83:9.4.27\nhub:94:4.19.10\nhub:169:fw-4 rev 20\nhub:181:spaced out fw 9",
+      "stateDigest": "a790ece4506648a63fa14677b95e0400e6f38075af3bf2a53a949a02c92a2d58"
+    },
+    {
+      "state": {
+        "configName": "práctica",
+        "configSha256": "9dc7c4286916b8511845e0ad22378f24b39145d0ab2b09b9ae5aab4a6b1ba044",
+        "hubs": [
+          {
+            "address": 74,
+            "firmware": "spaced out fw 2"
+          },
+          {
+            "address": 76,
+            "firmware": "spaced out fw 4"
+          },
+          {
+            "address": 150,
+            "firmware": "5.11.2"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica\nconfig-sha256:9dc7c4286916b8511845e0ad22378f24b39145d0ab2b09b9ae5aab4a6b1ba044\nhub:74:spaced out fw 2\nhub:76:spaced out fw 4\nhub:150:5.11.2",
+      "stateDigest": "37e022ebf71ee54242b844f8f1b4c7a7754903c3bfff8e82f1aba15875bc5246"
+    },
+    {
+      "state": {
+        "configName": "my:config58",
+        "configSha256": "d38cca184e2bfdfdd6336a23242ba1b95126e9574be20abd4930cc6b5b2846a9",
+        "hubs": [
+          {
+            "address": 144,
+            "firmware": "4.1.15"
+          },
+          {
+            "address": 152,
+            "firmware": "fw-6β rev 20"
+          },
+          {
+            "address": 161,
+            "firmware": "fw-4β rev 25"
+          },
+          {
+            "address": 169,
+            "firmware": "fw-7βββ rev 28"
+          },
+          {
+            "address": 224,
+            "firmware": "3.4.12"
+          },
+          {
+            "address": 250,
+            "firmware": "fw-3 rev 20"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:my:config58\nconfig-sha256:d38cca184e2bfdfdd6336a23242ba1b95126e9574be20abd4930cc6b5b2846a9\nhub:144:4.1.15\nhub:152:fw-6β rev 20\nhub:161:fw-4β rev 25\nhub:169:fw-7βββ rev 28\nhub:224:3.4.12\nhub:250:fw-3 rev 20",
+      "stateDigest": "0dd90f786eb202fe7325d5b374680dea4988b7046c44d752b70c9b6e600f7866"
+    },
+    {
+      "state": {
+        "configName": "práctica68",
+        "configSha256": "500e3060d0a5fb40380736661e24d729898a74b10a3a418e8ef21b11155273c1",
+        "hubs": [
+          {
+            "address": 99,
+            "firmware": "spaced out fw 0"
+          },
+          {
+            "address": 118,
+            "firmware": "Maj: 7, Min: 1"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica68\nconfig-sha256:500e3060d0a5fb40380736661e24d729898a74b10a3a418e8ef21b11155273c1\nhub:99:spaced out fw 0\nhub:118:Maj: 7, Min: 1",
+      "stateDigest": "e571537da157d6f9673aebcdeff547e1c8daf596f4fe9484c9b2c009df14feff"
+    },
+    {
+      "state": {
+        "configName": "robot31",
+        "configSha256": "fdf205b8d6f96ba8746331b9c9440c96b9340cdd59db118db0c528c2a3b3ed76",
+        "hubs": []
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:robot31\nconfig-sha256:fdf205b8d6f96ba8746331b9c9440c96b9340cdd59db118db0c528c2a3b3ed76",
+      "stateDigest": "c8e3dc02e5135a6b805768a04d82b69fc350a8d77b0a4662a2aefac94510f9c0"
+    },
+    {
+      "state": {
+        "configName": "bot 2",
+        "configSha256": "bcc1108a9c3424c2665e094f0abe254b0c06f64b1d6d57e954dd416d711d97b8",
+        "hubs": [
+          {
+            "address": 59,
+            "firmware": "fw-8βββ rev 7"
+          },
+          {
+            "address": 179,
+            "firmware": "5.8.23"
+          },
+          {
+            "address": 198,
+            "firmware": "0.4.0"
+          },
+          {
+            "address": 232,
+            "firmware": "8.0.24"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:bot 2\nconfig-sha256:bcc1108a9c3424c2665e094f0abe254b0c06f64b1d6d57e954dd416d711d97b8\nhub:59:fw-8βββ rev 7\nhub:179:5.8.23\nhub:198:0.4.0\nhub:232:8.0.24",
+      "stateDigest": "8d8da294717a00f9bc01e814456a3ed08a2c49c085e2d426f7d29b849bed9194"
+    },
+    {
+      "state": {
+        "configName": "my:config7",
+        "configSha256": "6d7fc4a3c170ff246afff38b655d362fef72aa2ecfa2d7fbc82b4a21ed1e10e3",
+        "hubs": [
+          {
+            "address": 36,
+            "firmware": "0.10.27"
+          },
+          {
+            "address": 116,
+            "firmware": "3.13.9"
+          },
+          {
+            "address": 152,
+            "firmware": "5.3.9"
+          },
+          {
+            "address": 183,
+            "firmware": "fw-0 rev 20"
+          },
+          {
+            "address": 233,
+            "firmware": "Maj: 1, Min: 2"
+          },
+          {
+            "address": 247,
+            "firmware": "8.10.7"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:my:config7\nconfig-sha256:6d7fc4a3c170ff246afff38b655d362fef72aa2ecfa2d7fbc82b4a21ed1e10e3\nhub:36:0.10.27\nhub:116:3.13.9\nhub:152:5.3.9\nhub:183:fw-0 rev 20\nhub:233:Maj: 1, Min: 2\nhub:247:8.10.7",
+      "stateDigest": "07aa53f58694fa0dd2d5bc2bbf7fdcec5fcea9625e7adadad48ad187c4da2862"
+    },
+    {
+      "state": {
+        "configName": "v2.final.FINAL",
+        "configSha256": "7a0179d0bdcedf14a31cf5de4f5c40d88b2609f805ef2bac3f7a1f01a4b22115",
+        "hubs": [
+          {
+            "address": 47,
+            "firmware": "3.0.19"
+          },
+          {
+            "address": 128,
+            "firmware": "6.3.0"
+          },
+          {
+            "address": 185,
+            "firmware": "0.16.13"
+          },
+          {
+            "address": 244,
+            "firmware": "0.12.0"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:v2.final.FINAL\nconfig-sha256:7a0179d0bdcedf14a31cf5de4f5c40d88b2609f805ef2bac3f7a1f01a4b22115\nhub:47:3.0.19\nhub:128:6.3.0\nhub:185:0.16.13\nhub:244:0.12.0",
+      "stateDigest": "e24003af644092bbee1c5c754ed63a431c97310cd5df6db45cc3b85f7223f448"
+    },
+    {
+      "state": {
+        "configName": "2026_biobuzz",
+        "configSha256": "a8ab5d9ddb539eed7a6976ecd50941825c96ce4e63c673517691857463f66170",
+        "hubs": [
+          {
+            "address": 33,
+            "firmware": "5.9.10"
+          },
+          {
+            "address": 144,
+            "firmware": "fw-1 rev 20"
+          },
+          {
+            "address": 242,
+            "firmware": "spaced out fw 6"
+          },
+          {
+            "address": 245,
+            "firmware": "4.18.14"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:2026_biobuzz\nconfig-sha256:a8ab5d9ddb539eed7a6976ecd50941825c96ce4e63c673517691857463f66170\nhub:33:5.9.10\nhub:144:fw-1 rev 20\nhub:242:spaced out fw 6\nhub:245:4.18.14",
+      "stateDigest": "0c32180e7a8f2cec9ada753ad399f7c18a42f2b0e19c63ef704f7080ee8a70e4"
+    },
+    {
+      "state": {
+        "configName": "robot",
+        "configSha256": "132d6b6867c89b86e22958c0205ed50c83829f13677805f19a3d32960865bacf",
+        "hubs": [
+          {
+            "address": 49,
+            "firmware": "spaced out fw 8"
+          },
+          {
+            "address": 51,
+            "firmware": "0.19.22"
+          },
+          {
+            "address": 86,
+            "firmware": "7.18.25"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:robot\nconfig-sha256:132d6b6867c89b86e22958c0205ed50c83829f13677805f19a3d32960865bacf\nhub:49:spaced out fw 8\nhub:51:0.19.22\nhub:86:7.18.25",
+      "stateDigest": "51d457e94e07741d20377813cf9cff000f7b0f7a35a2da0e6ca15295e60e6aa1"
+    },
+    {
+      "state": {
+        "configName": "my:config",
+        "configSha256": "dd2ba11393d05041eb57dba37be175b164af52c859315d9edc1af91e8bba19c4",
+        "hubs": [
+          {
+            "address": 7,
+            "firmware": "fw-1βββ rev 15"
+          },
+          {
+            "address": 30,
+            "firmware": "3.19.23"
+          },
+          {
+            "address": 34,
+            "firmware": "Maj: 8, Min: 11"
+          },
+          {
+            "address": 202,
+            "firmware": "2.14.24"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:my:config\nconfig-sha256:dd2ba11393d05041eb57dba37be175b164af52c859315d9edc1af91e8bba19c4\nhub:7:fw-1βββ rev 15\nhub:30:3.19.23\nhub:34:Maj: 8, Min: 11\nhub:202:2.14.24",
+      "stateDigest": "2c8125cbccf0be4423619c855654359c2a8609d7bd51e79081217c789eb56b9f"
+    },
+    {
+      "state": {
+        "configName": "práctica",
+        "configSha256": "8e8890fd779af59fcf25b649614db23cabdced7da70b18d8052702ffa153a835",
+        "hubs": [
+          {
+            "address": 28,
+            "firmware": "Maj: 8, Min: 16"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:práctica\nconfig-sha256:8e8890fd779af59fcf25b649614db23cabdced7da70b18d8052702ffa153a835\nhub:28:Maj: 8, Min: 16",
+      "stateDigest": "e9319e757034536876137afc17b0a53fb8d77e50e2824cf69c5d7fa6bf61b316"
+    },
+    {
+      "state": {
+        "configName": "2026_biobuzz",
+        "configSha256": "a7d13593ee8cb8f4bbd9db07c855f576ce1fd26b4245d1e771e17b6ddb865b89",
+        "hubs": [
+          {
+            "address": 21,
+            "firmware": "fw-1ββ rev 25"
+          },
+          {
+            "address": 72,
+            "firmware": "7.12.4"
+          },
+          {
+            "address": 82,
+            "firmware": "Maj: 5, Min: 9"
+          },
+          {
+            "address": 143,
+            "firmware": "8.2.29"
+          },
+          {
+            "address": 209,
+            "firmware": "5.17.11"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:2026_biobuzz\nconfig-sha256:a7d13593ee8cb8f4bbd9db07c855f576ce1fd26b4245d1e771e17b6ddb865b89\nhub:21:fw-1ββ rev 25\nhub:72:7.12.4\nhub:82:Maj: 5, Min: 9\nhub:143:8.2.29\nhub:209:5.17.11",
+      "stateDigest": "07c20c78e814006aaab05c181a9c11d2597dcbdc314f8426b9fee8ad51943e03"
+    },
+    {
+      "state": {
+        "configName": "CompBot48",
+        "configSha256": "bbc01407e28f49232c18ff9b1eb38b6e09fd401dc201a37afe9cd4732c1f7084",
+        "hubs": [
+          {
+            "address": 3,
+            "firmware": "8.3.5"
+          },
+          {
+            "address": 40,
+            "firmware": "Maj: 6, Min: 14"
+          },
+          {
+            "address": 93,
+            "firmware": "5.14.4"
+          },
+          {
+            "address": 96,
+            "firmware": "spaced out fw 1"
+          },
+          {
+            "address": 151,
+            "firmware": "3.13.2"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:CompBot48\nconfig-sha256:bbc01407e28f49232c18ff9b1eb38b6e09fd401dc201a37afe9cd4732c1f7084\nhub:3:8.3.5\nhub:40:Maj: 6, Min: 14\nhub:93:5.14.4\nhub:96:spaced out fw 1\nhub:151:3.13.2",
+      "stateDigest": "83779d4ce186d2191b5d451f5344ebdf06a790775e564094b319f90b04276ca5"
+    },
+    {
+      "state": {
+        "configName": "ローバー46",
+        "configSha256": "470eec8b349b7122e9c288086820ab88c93638c9b64b5e830ab6332c0030c286",
+        "hubs": [
+          {
+            "address": 112,
+            "firmware": "spaced out fw 6"
+          },
+          {
+            "address": 220,
+            "firmware": "1.12.20"
+          },
+          {
+            "address": 245,
+            "firmware": "6.9.2"
+          }
+        ]
+      },
+      "canonicalText": "physync-gate-v1\nconfig-name:ローバー46\nconfig-sha256:470eec8b349b7122e9c288086820ab88c93638c9b64b5e830ab6332c0030c286\nhub:112:spaced out fw 6\nhub:220:1.12.20\nhub:245:6.9.2",
+      "stateDigest": "66c384e5ef7126bb4997c7f8226b0c7522203670ceb16a5e9e5863cd012de6d9"
+    }
+  ],
+  "firmwareNormalization": {
+    "purpose": "PhysyncGate.normalizeFirmware(raw) must produce EXACTLY expected for every pair — including the Unicode-whitespace and sentinel cases, where Java regex defaults diverge from JavaScript.",
+    "pairs": [
+      {
+        "raw": "HW: 20, Maj: 1, Min: 8, Eng: 2",
+        "expected": "1.8.2"
+      },
+      {
+        "raw": "Maj: 1, Min: 8, Eng: 2",
+        "expected": "1.8.2"
+      },
+      {
+        "raw": "Maj:1,Min:8,Eng:2",
+        "expected": "1.8.2"
+      },
+      {
+        "raw": "Eng: 2, Maj: 1, Min: 8",
+        "expected": "1.8.2"
+      },
+      {
+        "raw": "1.8.2",
+        "expected": "1.8.2"
+      },
+      {
+        "raw": "Maj: 1, Min: 8",
+        "expected": "Maj: 1, Min: 8"
+      },
+      {
+        "raw": "xMaj: 1, Min: 2, Eng: 3",
+        "expected": "1.2.3"
+      },
+      {
+        "raw": "Maj: 1, Min: 2, Eng: 3, Maj: 9",
+        "expected": "1.2.3"
+      },
+      {
+        "raw": "Maj: 12abc, Min: 2, Eng: 3",
+        "expected": "12.2.3"
+      },
+      {
+        "raw": "1.8.2 final",
+        "expected": "1.8.2 final"
+      },
+      {
+        "raw": "v1　rev　7",
+        "expected": "v1 rev 7"
+      },
+      {
+        "raw": "  spaced   out\tfw 3 ",
+        "expected": "spaced out fw 3"
+      },
+      {
+        "raw": "firmware version unavailable",
+        "expected": ""
+      },
+      {
+        "raw": "unknown firmware version",
+        "expected": ""
+      },
+      {
+        "raw": "unknown",
+        "expected": ""
+      },
+      {
+        "raw": "",
+        "expected": ""
+      }
+    ]
+  }
+}

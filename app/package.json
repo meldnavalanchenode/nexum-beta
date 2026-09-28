@@ -1,0 +1,21 @@
+{
+  "name": "physync",
+  "version": "0.3.0",
+  "private": true,
+  "description": "PHYSYNC — preflight verification for FTC robots: the robot you built is the robot your software thinks you built",
+  "type": "module",
+  "bin": {
+    "physync": "bin/physync.js"
+  },
+  "scripts": {
+    "check": "node bin/physync.js check --config samples/config.xml --code samples/TeamCode",
+    "ui": "node src/server.js",
+    "test": "node --test --test-concurrency=4 test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

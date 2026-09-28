@@ -1,0 +1,1 @@
+<Robot type="FirstInspires-FTC"><LynxUsbDevice name="P" serialNumber="B" parentModuleAddress="173"><LynxModule name="Control Hub" port="173"><goBILDA5202SeriesMotor name="left_drive" port="0" /><Servo name="wrist" port="0" /></LynxModule></LynxUsbDevice></Robot>

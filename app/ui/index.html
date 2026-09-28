@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHYSYNC — robot preflight</title>
+<style>
+  :root {
+    --bg: #0d1017; --panel: #151a23; --line: #232b3a; --text: #e9edf5;
+    --dim: #97a1b5; --accent: #38bdf8; --pass: #34d399; --fail: #f87171; --warn: #fbbf24; --info: #60a5fa;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 14px 22px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 12px; }
+  header h1 { font-size: 17px; letter-spacing: .08em; }
+  header h1 b { color: var(--accent); }
+  header span { color: var(--dim); font-size: 13px; }
+  main { display: grid; grid-template-columns: minmax(340px, 480px) 1fr; gap: 18px; padding: 18px 22px; max-width: 1440px; }
+  @media (max-width: 940px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .panel h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin-bottom: 10px; }
+  textarea { width: 100%; height: 200px; background: #0a0d13; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12.5px/1.5 ui-monospace, Menlo, monospace; resize: vertical; }
+  .row { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+  button, .filebtn { background: #1e2735; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 14px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06222e; font-weight: 700; }
+  button:disabled { opacity: .5; cursor: default; }
+  #fileList { margin-top: 10px; font-size: 13px; color: var(--dim); }
+  #fileList li { margin-left: 18px; }
+  .banner { border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; font-weight: 700; font-size: 17px; letter-spacing: .04em; border: 1px solid; }
+  .banner.pass { border-color: var(--pass); color: var(--pass); background: rgba(52,211,153,.08); }
+  .banner.fail { border-color: var(--fail); color: var(--fail); background: rgba(248,113,113,.08); }
+  .banner sub { display: block; font-weight: 400; font-size: 12.5px; color: var(--dim); margin-top: 4px; letter-spacing: 0; }
+  .finding { border: 1px solid var(--line); border-left: 4px solid var(--dim); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  .finding.FAIL { border-left-color: var(--fail); }
+  .finding.WARN { border-left-color: var(--warn); }
+  .finding.INFO { border-left-color: var(--info); }
+  .finding .msg { font-size: 14px; }
+  .finding .fix { color: var(--dim); font-size: 13px; margin-top: 4px; }
+  .finding .ev { color: var(--dim); font-size: 12px; margin-top: 4px; font-family: ui-monospace, Menlo, monospace; }
+  .chip { display: inline-block; border-radius: 20px; padding: 1px 9px; font-size: 11px; font-weight: 700; margin-right: 8px; vertical-align: 1px; }
+  .chip.FAIL { background: rgba(248,113,113,.15); color: var(--fail); }
+  .chip.WARN { background: rgba(251,191,36,.15); color: var(--warn); }
+  .chip.INFO { background: rgba(96,165,250,.15); color: var(--info); }
+  .chip.PASS { background: rgba(52,211,153,.15); color: var(--pass); }
+  .chip.UNKNOWN { background: rgba(148,163,184,.18); color: #94a3b8; }
+  .banner.warn { border-color: var(--warn); color: var(--warn); background: rgba(251,191,36,.08); }
+  .banner.info { border-color: var(--info); color: var(--info); background: rgba(96,165,250,.08); }
+  .subhead { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 14px 0 6px; }
+  .kv { font-size: 13.5px; margin: 2px 0 2px 8px; }
+  .kv b { color: var(--text); }
+  .dead { color: var(--fail); }
+  .tl { border-left: 2px solid var(--line); margin-left: 8px; padding-left: 14px; }
+  .tl .node { margin-bottom: 10px; font-size: 13.5px; }
+  .tl .node .when { color: var(--dim); font-size: 12px; }
+  .dep { font: 12.5px/1.7 ui-monospace, Menlo, monospace; color: var(--dim); }
+  .dep .inv { color: var(--fail); font-weight: 700; }
+  details summary { cursor: pointer; color: var(--accent); font-size: 13px; margin-top: 6px; }
+  input.txt, select.txt { background: #0a0d13; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13.5px; flex: 1; min-width: 120px; }
+  .hint { color: var(--dim); font-size: 13px; margin-top: 6px; }
+  .placeholder { color: var(--dim); padding: 30px 0; text-align: center; }
+  .error { color: var(--fail); margin-top: 10px; font-size: 13.5px; }
+  footer { padding: 10px 22px 22px; color: var(--dim); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<header><h1>PHY<b>SYNC</b></h1><span>the robot you built is the robot your software thinks you built — local only</span></header>
+<main>
+  <section class="panel">
+    <h2>1 · Active configuration XML</h2>
+    <textarea id="config" placeholder="Paste the active configuration (physync pull grabs it from the hub: /sdcard/FIRST/*.xml)…"></textarea>
+    <h2 style="margin-top:14px">2 · TeamCode (.java / .kt / .blk)</h2>
+    <div class="row">
+      <label class="filebtn">Add files<input id="files" type="file" multiple accept=".java,.kt,.blk" hidden></label>
+      <button id="loadSample">Load sample</button>
+      <button id="clear">Clear</button>
+    </div>
+    <ul id="fileList"></ul>
+    <div class="row">
+      <button class="primary" id="run">Run preflight</button>
+      <button class="primary" id="runStatus">Run status vs verified state</button>
+      <button id="saveState">Save verified state</button>
+      <button id="download" disabled>Download report</button>
+    </div>
+    <div class="error" id="error" hidden></div>
+    <h2 style="margin-top:18px">3 · Approval gate</h2>
+    <div style="color:var(--dim);font-size:13px;margin-bottom:8px">Freeze a hand-verified state, then ask later: <em>is this still the robot you approved?</em> UI approvals live in memory — the durable signed workflow is <code>physync approve</code>.</div>
+    <textarea id="robotReport" style="height:90px" placeholder="Optional: paste physync-robot.json (from the Preflight OpMode) to cover the hub layer…"></textarea>
+    <div class="row">
+      <button id="approve">Approve current state</button>
+      <button class="primary" id="gate">Run gate</button>
+      <button id="forget">Forget approval</button>
+    </div>
+    <div id="gateStatus" style="color:var(--dim);font-size:13px;margin-top:8px">No approval this session.</div>
+    <h2 style="margin-top:18px">4 · Record</h2>
+    <div style="color:var(--dim);font-size:13px;margin-bottom:8px">The three actions evidence comes from. Everything lands in this project's <code>.physync/</code> — the same ledger the CLI reads, so the UI and the terminal can never disagree.</div>
+
+    <div class="subhead">Report a physical change — a person's word, recorded as HUMAN-REPORTED, never a detection</div>
+    <div class="row">
+      <input class="txt" id="chgComponent" placeholder="component (e.g. camera-position)">
+      <input class="txt" id="chgNote" placeholder='note (e.g. "camera mount re-aimed")'>
+    </div>
+    <div class="row">
+      <input class="txt" id="chgBy" placeholder="reported by (your name — required)">
+      <button id="reportChange">Report change</button>
+    </div>
+    <div class="hint" id="chgStatus"></div>
+
+    <div class="subhead">Approve a proposed dependency rule — a named human makes it real</div>
+    <div class="row">
+      <select class="txt" id="ruleSelect"><option value="">(no proposed edges — load a pack: physync rules --pack camera-pose)</option></select>
+    </div>
+    <div class="row">
+      <input class="txt" id="ruleBy" placeholder="approved by (name — required)">
+      <button id="approveRule">Approve rule</button>
+    </div>
+    <div class="hint" id="ruleStatus"></div>
+
+    <div class="subhead">Record a test / calibration result — PHYSYNC never runs tests; people do</div>
+    <div class="row">
+      <input class="txt" id="resTest" list="testList" placeholder="test id (e.g. localization)">
+      <datalist id="testList"></datalist>
+      <input class="txt" id="resValue" placeholder="value (number)" style="max-width:130px">
+      <select class="txt" id="resVerdict" style="max-width:190px">
+        <option value="">verdict from threshold</option>
+        <option>PASS</option><option>FAIL</option><option>UNKNOWN</option>
+      </select>
+    </div>
+    <div class="row">
+      <input class="txt" id="resMethod" placeholder="method (how it was obtained)">
+      <input class="txt" id="resBy" placeholder="recorded by (name — required)">
+    </div>
+    <div class="row">
+      <label style="font-size:13px;color:var(--dim)"><input type="checkbox" id="resSimulated"> simulated — demo/drill data; satisfies nothing</label>
+      <button id="recordResult">Record result</button>
+    </div>
+    <div class="hint" id="resStatus"></div>
+  </section>
+  <section class="panel" id="results">
+    <h2>Preflight result</h2>
+    <div class="placeholder">First time here? Three steps:<br><br>
+      1 · Paste your configuration XML and add your TeamCode files, then <b>Run preflight</b> — mismatches (or a clean bill) appear here in seconds.<br>
+      2 · When everything's right, <b>Save verified state</b> — that freezes V1, the robot you trust.<br>
+      3 · After anything changes, <b>Run status vs verified state</b> — what changed, what evidence it put in question, and the minimum rechecks owed.</div>
+  </section>
+  <section class="panel" id="history" style="grid-column: 1 / -1">
+    <h2>Robot overview · history · dependencies</h2>
+    <div id="overviewBody"><div class="placeholder">Loading verified-state history…</div></div>
+  </section>
+</main>
+<footer>PHYSYNC — findings carry check id + version + evidence. <span class="chip FAIL">FAIL</span>blocks the match · <span class="chip WARN">WARN</span>pass with caution · <span class="chip INFO">INFO</span>context. Nothing unparseable is silently dropped.</footer>
+<script>
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
+let files = []
+let markdown = null
+
+const renderFiles = () => {
+  $('fileList').innerHTML = files.map((f) => `<li>${esc(f.name)} <span>(${f.content.length.toLocaleString()} chars)</span></li>`).join('')
+}
+$('files').addEventListener('change', async (e) => {
+  for (const f of e.target.files) files.push({ name: f.name, content: await f.text() })
+  renderFiles()
+  // Reset so picking the same file again (after Clear, or twice) still
+  // fires a change event — an unfired event reads as a silent no-op.
+  e.target.value = ''
+})
+$('clear').onclick = () => { files = []; $('config').value = ''; renderFiles() }
+$('loadSample').onclick = async () => {
+  const s = await (await fetch('/sample')).json()
+  $('config').value = s.configXml
+  files = s.files
+  renderFiles()
+}
+$('download').onclick = () => {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown' }))
+  a.download = 'physync-report.md'
+  a.click()
+}
+$('run').onclick = async () => {
+  $('error').hidden = true
+  const res = await fetch('/check', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ configXml: $('config').value, files }),
+  })
+  const data = await res.json()
+  if (!res.ok) { $('error').textContent = data.error; $('error').hidden = false; return }
+  render(data)
+}
+const postJson = async (url, body, method = 'POST') => {
+  const res = await fetch(url, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+  return { res, data: await res.json() }
+}
+const showError = (msg) => { $('error').textContent = msg; $('error').hidden = false }
+
+$('approve').onclick = async () => {
+  $('error').hidden = true
+  const { res, data } = await postJson('/approve', { configXml: $('config').value, files, robotReport: $('robotReport').value })
+  if (!res.ok) {
+    showError(data.error)
+    if (data.findings) render(data) // show WHY approval was refused
+    $('gateStatus').textContent = 'Approval refused — fix the findings, re-verify, try again.'
+    return
+  }
+  $('gateStatus').innerHTML = `Approved <b>${esc(data.configName)}</b> at ${esc(data.approvedAt)} — ${data.deviceCount} devices${data.hubsVerified ? `, ${data.hubs.length} hub(s) with firmware` : ' · <b>declaration layer only</b> (no robot report)'}. State digest ${esc(data.stateDigest.slice(0, 12))}…`
+}
+
+$('gate').onclick = async () => {
+  $('error').hidden = true
+  const { res, data } = await postJson('/gate', { configXml: $('config').value, robotReport: $('robotReport').value })
+  if (!res.ok) { showError(data.error); return }
+  renderGate(data)
+}
+
+$('forget').onclick = async () => {
+  await postJson('/approve', null, 'DELETE')
+  $('gateStatus').textContent = 'No approval this session.'
+}
+
+function renderGate({ verdict, findings, context }) {
+  const order = { FAIL: 0, WARN: 1, INFO: 2 }
+  const sorted = [...findings].sort((a, b) => order[a.severity] - order[b.severity])
+  const sub = `approved ${esc(context.approvedAt)}${context.hubsVerified ? '' : ' · declaration layer only'} · engine v${esc(context.engineVersion)}`
+  const banner = verdict === 'PASS'
+    ? `<div class="banner pass">██ GATE: STILL THE ROBOT YOU APPROVED<sub>${sub}</sub></div>`
+    : `<div class="banner fail">██ GATE: NOT THE ROBOT YOU APPROVED<sub>${sub}</sub></div>`
+  const cards = sorted.length === 0
+    ? '<div class="placeholder">Configuration and hub census both match the approved state, as of the robot report you supplied.</div>'
+    : sorted.map((f) => `
+      <div class="finding ${f.severity}">
+        <div class="msg"><span class="chip ${f.severity}">${f.severity}</span>${esc(f.message)}</div>
+        <div class="fix">${esc(f.fix)}</div>
+        ${f.evidence.length ? `<div class="ev">${f.evidence.map(esc).join(' · ')} <em>(${esc(f.checkId)} v${esc(f.checkVersion)})</em></div>` : `<div class="ev"><em>(${esc(f.checkId)} v${esc(f.checkVersion)})</em></div>`}
+      </div>`).join('')
+  $('results').innerHTML = `<h2>Gate result</h2>${banner}${cards}`
+}
+
+// ── Phase 5: status, verified states, history ────────────────────────────
+const STATUS_CLASS = {
+  'VERIFIED FOR DEFINED CHECKS': 'pass',
+  'REVALIDATION REQUIRED': 'warn',
+  'VALIDATION FAILED': 'fail',
+  'VERIFICATION INCOMPLETE': 'info',
+}
+let lastInvalidated = new Set()
+let lastGraph = null // kept fresh by refreshOverview; lets status rows show the dependency PATH
+
+$('runStatus').onclick = async () => {
+  $('error').hidden = true
+  const { res, data } = await postJson('/status', { configXml: $('config').value, files, robotReport: $('robotReport').value })
+  if (!res.ok) { showError(data.error); return }
+  lastInvalidated = new Set((data.revalidation?.invalidated ?? []).map((i) => i.evidenceId))
+  renderStatus(data)
+  refreshOverview()
+}
+
+$('saveState').onclick = async () => {
+  $('error').hidden = true
+  const { res, data } = await postJson('/state', { configXml: $('config').value, files, robotReport: $('robotReport').value })
+  if (!res.ok) { showError(data.error); if (data.findings) render(data); return }
+  lastInvalidated = new Set()
+  $('results').innerHTML = `<h2>Verified state saved</h2>
+    <div class="banner pass">██ V${data.version} SAVED<sub>${data.evidence} evidence items (${data.unknown} UNKNOWN — stated, not hidden) · hubs ${data.coverage.hubs ? '✓' : '—'} · sensors ${data.coverage.sensors ? '✓' : '—'} · stimulus ${data.coverage.stimulus ? '✓' : '—'}</sub></div>
+    <div class="placeholder">History is append-only — re-verifying later creates V${data.version + 1}, never edits V${data.version}.</div>`
+  refreshOverview()
+}
+
+// The dependency PATH a demand traveled, with who vouched for each hop — a
+// user should never have to trust an unexplained conclusion. And the exact
+// next action — an owed check never leaves you wondering how to record it.
+const reqPath = (r) => {
+  if (!lastGraph || !r.via?.length) return ''
+  const byId = new Map([...lastGraph.builtin, ...lastGraph.custom].map((e) => [e.id, e]))
+  const hops = r.via.map((id) => byId.get(id)).filter(Boolean)
+  if (!hops.length) return ''
+  return `<br><span style="margin-left:0">path: ${hops.map((e) => `${esc(e.from)} → ${esc(e.to)} ${e.approvedBy ? `(approved by ${esc(e.approvedBy)})` : '(deterministic rule)'}`).join(' · ')}</span>`
+}
+const reqHint = (r) => {
+  const bare = r.action?.startsWith('test:') ? r.action.slice(5) : r.action?.startsWith('calibration:') ? r.action.slice(12) : null
+  return bare ? `<br><span style="margin-left:0">when done, record it in panel 4 · Record (test id <code>${esc(bare)}</code>)</span>` : ''
+}
+
+function renderStatus(d) {
+  const cls = STATUS_CLASS[d.status] ?? 'info'
+  const summary = [
+    `${d.changes.filter((c) => c.source !== 'human').length} change(s) detected` + (d.changes.some((c) => c.source === 'human') ? ` · ${d.changes.filter((c) => c.source === 'human').length} human-reported` : ''),
+    d.revalidation ? `${d.revalidation.invalidated.length} evidence item(s) invalidated` : null,
+    d.revalidation ? `${d.revalidation.required.length} revalidation action(s) required` : null,
+    d.resultFailures ? `${d.resultFailures} recorded test FAIL(s)` : null,
+  ].filter(Boolean).join(' · ')
+  const sec = (title, rows) => rows?.length ? `<div class="subhead">${title}</div>${rows.join('')}` : ''
+  $('results').innerHTML = `<h2>Deployment evidence status</h2>
+    <div class="banner ${cls}">██ ${esc(d.status)}<sub>vs verified state ${esc(d.against)} (${esc(d.baseCreatedAt)}) · ${summary}</sub></div>
+    ${sec('What changed (detected by comparing files and reports)', d.changes.filter((c) => c.source !== 'human').map((c) => `<div class="kv">• <b>${esc(c.component)}</b>: ${esc(String(c.previous ?? '(absent)'))} → ${esc(String(c.current ?? '(absent)'))} <span class="chip INFO">${esc(c.source)}/${esc(c.method)}</span></div>`))}
+    ${sec('HUMAN-REPORTED CHANGE (not detected — nothing was measured)', d.changes.filter((c) => c.source === 'human').map((c) => `<div class="kv">• <b>${esc(c.component)}</b> — reported by ${esc(String(c.by ?? 'unknown'))}${c.note ? `: &ldquo;${esc(String(c.note))}&rdquo;` : ''} <span class="chip WARN">HUMAN-REPORTED · ${esc(c.source)}/${esc(c.method)}</span></div>`))}
+    ${sec('What did this invalidate', (d.revalidation?.invalidated ?? []).map((i) => `<div class="kv dead">✝ ${esc(i.evidenceId)} <span style="color:var(--dim)">— because ${esc((i.becauseHuman ?? i.because).join('; '))}</span></div>`))}
+    ${sec('Required revalidation (minimum set)', (d.revalidation?.required ?? []).map((r) => `<div class="kv">→ <b>${esc(r.label)}</b><br><span style="color:var(--dim);margin-left:14px">covers: ${r.targets.map(esc).join(' · ')}<br><span style="margin-left:0">required because: ${esc((r.becauseHuman?.length ? r.becauseHuman : r.because).join('; '))}</span>${reqPath(r)}${reqHint(r)}</span></div>`))}
+    ${sec('Satisfied by this run', (d.revalidation?.satisfiedThisRun ?? []).map((r) => `<div class="kv" style="color:var(--pass)">✓ ${esc(r.label)}</div>`))}
+    ${sec('NO DEPENDENCY MAPPING (nothing invalidated automatically — review by hand)', (d.revalidation?.unmappedChanges ?? []).map((u) => `<div class="kv" style="color:var(--warn)">⚠ ${esc(u)}</div>`))}
+    ${sec('Recorded failing results (standing — no change demanded these, they are simply failing)', (d.standingFailures ?? []).map((r) => `<div class="kv dead">✗ test:${esc(r.testId)}${r.value != null ? ` = ${r.value}` : ''} — recorded ${esc(r.recordedAt)} by ${esc(r.recordedBy)}</div>`))}
+    ${sec('Regressions', (d.regressions ?? []).map((r) => `<div class="kv" style="color:var(--warn)">⚠ ${esc(r.testId)}: ${r.previous.value} → ${r.current.value} (Δ ${+r.delta.toFixed(4)})</div>`))}
+    ${sec('Not compared (supply the missing input)', (d.gaps ?? []).map((g) => `<div class="kv">? ${esc(g)}</div>`))}
+    ${sec('Standing evidence', (d.standing ?? []).map((s) => `<div class="kv">≡ ${esc(s)}</div>`))}`
+}
+
+// ── the three recording actions ──────────────────────────────────────────
+const hintOk = (id, html) => { $(id).innerHTML = html }
+const hintErr = (id, msg) => { $(id).innerHTML = `<span style="color:var(--fail)">${esc(msg)}</span>` }
+
+$('reportChange').onclick = async () => {
+  const { res, data } = await postJson('/change', { component: $('chgComponent').value.trim(), note: $('chgNote').value.trim(), by: $('chgBy').value.trim() })
+  if (!res.ok) return hintErr('chgStatus', data.error)
+  hintOk('chgStatus', `<span class="chip WARN">HUMAN-REPORTED</span>Recorded <b>${esc(data.recorded.id)}</b>: ${esc(data.recorded.component)} — by ${esc(data.recorded.by)} at ${esc(data.recorded.at)}. ${esc(data.note)} Click <b>Run status vs verified state</b> to see the effect.`)
+  $('chgComponent').value = ''; $('chgNote').value = ''
+  refreshOverview()
+}
+
+$('approveRule').onclick = async () => {
+  if (!$('ruleSelect').value) return hintErr('ruleStatus', 'Pick a proposed edge first — with none listed, load a pack or propose one via the CLI.')
+  const { res, data } = await postJson('/rule/approve', { id: $('ruleSelect').value, by: $('ruleBy').value.trim() })
+  if (!res.ok) return hintErr('ruleStatus', data.error)
+  hintOk('ruleStatus', `<span class="chip PASS">APPROVED</span><b>${esc(data.approved.from)} → ${esc(data.approved.to)}</b> by ${esc(data.approved.approvedBy)}. ${esc(data.note)}`)
+  refreshOverview()
+}
+
+$('recordResult').onclick = async () => {
+  const { res, data } = await postJson('/result', {
+    testId: $('resTest').value.trim(), value: $('resValue').value.trim(),
+    verdict: $('resVerdict').value || null, method: $('resMethod').value.trim(),
+    by: $('resBy').value.trim(), simulated: $('resSimulated').checked,
+  })
+  if (!res.ok) return hintErr('resStatus', data.error)
+  const e = data.entry
+  hintOk('resStatus', `<span class="chip ${esc(e.verdict)}">${esc(e.verdict)}</span><b>test:${esc(e.testId)}</b>${e.value != null ? ` = ${e.value}` : ''}${e.threshold ? ` (threshold ${e.threshold.min != null ? '≥' + e.threshold.min : '≤' + e.threshold.max})` : ''} — by ${esc(e.recordedBy)}${e.method ? ` · ${esc(e.method)}` : ''}${e.simulated ? ' <span class="chip UNKNOWN">SIMULATED</span>' : ''}${data.note ? `<br>${esc(data.note)}` : ''}${!data.definedTest ? '<br>⚠ no definition for this test — recorded anyway; define it via physync tests --define' : ''}`)
+  refreshOverview()
+}
+
+async function refreshOverview() {
+  let data, res
+  try { res = await fetch('/overview'); data = await res.json() } catch { return }
+  if (!res.ok) {
+    // A corrupt ledger or tampered state carries an authored message — show
+    // it where the overview would be, never a silently-stale panel.
+    $('overviewBody').innerHTML = `<div class="kv" style="color:var(--fail)">Overview unavailable: ${esc(data?.error ?? 'server error')}</div>`
+    return
+  }
+  lastGraph = data.graph
+  // keep the recording forms in sync with what exists
+  const proposed = data.graph.custom.filter((e) => e.status === 'proposed')
+  const keep = $('ruleSelect').value
+  $('ruleSelect').innerHTML = proposed.length
+    ? proposed.map((e) => `<option value="${esc(e.id)}">${esc(e.id)}: ${esc(e.from)} → ${esc(e.to)}</option>`).join('')
+    : '<option value="">(no proposed edges — load a pack: physync rules --pack camera-pose)</option>'
+  if (proposed.some((e) => e.id === keep)) $('ruleSelect').value = keep
+  $('testList').innerHTML = data.tests.map((t) => `<option value="${esc(t.id)}">${esc(t.label)}</option>`).join('')
+  const latest = data.states[data.states.length - 1]
+  const evRow = (e) => `<div class="kv"><span class="chip ${esc(e.result)}">${esc(e.result)}</span><b>${esc(e.id)}</b> <span style="color:var(--dim)">[${esc(e.source)}/${esc(e.method)}] ${esc(e.summary)}</span></div>`
+  const timeline = data.states.map((s) => `
+    <div class="node">V${s.version} — <b>${esc(s.configName)}</b> <span class="when">${esc(s.createdAt)}${s.origin !== 'native' ? ` · ${esc(s.origin)}` : ''}</span>
+      · ${s.evidence.length} evidence (${s.unknown} UNKNOWN) · hubs ${s.coverage.hubs ? '✓' : '—'} sensors ${s.coverage.sensors ? '✓' : '—'} stimulus ${s.coverage.stimulus ? '✓' : '—'}
+      <details><summary>evidence</summary>${s.evidence.map(evRow).join('')}</details>
+    </div>`).join('')
+  const resultRows = data.results.slice(-8).reverse().map((r) => `<div class="kv"><span class="chip ${esc(r.verdict)}">${esc(r.verdict)}</span><b>test:${esc(r.testId)}</b>${r.value != null ? ` = ${r.value}` : ''}${r.simulated ? ' <span class="chip UNKNOWN">SIMULATED — satisfies nothing</span>' : ''} <span style="color:var(--dim)">${esc(r.recordedAt)} · by ${esc(r.recordedBy)}${r.method ? ` · ${esc(r.method)}` : ''}</span></div>`).join('')
+  const allEdges = [...data.graph.builtin, ...data.graph.custom]
+  const byFrom = new Map()
+  for (const e of allEdges) { if (!byFrom.has(e.from)) byFrom.set(e.from, []); byFrom.get(e.from).push(e) }
+  const dep = [...byFrom.entries()].map(([from, edges]) => `${esc(from)}\n${edges.map((e) => {
+    // A template target (sensor-liveness:$n, motor-response:*) is dead when
+    // any concrete instance of its family was invalidated — name the instances.
+    const prefix = e.to.includes('$n') ? e.to.split('$n')[0] : e.to.endsWith(':*') ? e.to.slice(0, -1) : null
+    const deadIds = prefix ? [...lastInvalidated].filter((id) => id.startsWith(prefix)) : (lastInvalidated.has(e.to) ? [e.to] : [])
+    const dead = deadIds.length > 0
+    return `  └─▶ <span class="${dead ? 'inv' : ''}">${esc(e.to)}${dead ? ` ✝ INVALIDATED${prefix ? ` (${deadIds.map(esc).join(', ')})` : ''}` : ''}</span>${e.status === 'proposed' ? ' <span class="chip UNKNOWN">PROPOSED — inactive</span>' : ''}`
+  }).join('\n')}`).join('\n')
+  $('overviewBody').innerHTML = `
+    <div class="kv">Robot: <b>${esc(data.robotId)}</b> · Latest verified: <b>${latest ? 'V' + latest.version : 'none'}</b>${latest ? ` (${esc(latest.createdAt)})` : ''} · ${data.tests.length} defined test(s) · ${data.results.length} recorded result(s)</div>
+    <div class="subhead">History (append-only — every version is forever)</div>
+    <div class="tl">${timeline || '<div class="placeholder">No verified states yet — run a passing preflight, then "Save verified state".</div>'}</div>
+    ${resultRows ? `<div class="subhead">Recent results</div>${resultRows}` : ''}
+    ${data.regressions.length ? `<div class="subhead">Regressions</div>${data.regressions.map((r) => `<div class="kv" style="color:var(--warn)">⚠ ${esc(r.testId)}: ${r.previous.value} → ${r.current.value} (Δ ${+r.delta.toFixed(4)})</div>`).join('')}` : ''}
+    <div class="subhead">Dependency graph (invalidated nodes highlight after a status run)</div>
+    <pre class="dep">${dep || 'no edges'}</pre>`
+}
+refreshOverview()
+
+function render({ verdict, findings, context, markdown: md }) {
+  // A refusal payload (approval/state-save rejected) has findings but no
+  // markdown — the download button must not offer a file of "undefined".
+  markdown = md ?? null
+  $('download').disabled = !markdown
+  const order = { FAIL: 0, WARN: 1, INFO: 2 }
+  const sorted = [...findings].sort((a, b) => order[a.severity] - order[b.severity])
+  const banner = verdict === 'PASS'
+    ? `<div class="banner pass">██ PREFLIGHT: PASS<sub>${context.deviceCount} devices${context.webcamCount ? ` + ${context.webcamCount} webcam(s)` : ''} · ${context.refCount} code references · ${context.filesScanned} source files${context.blkCount ? ` · ${context.blkCount} Blocks` : ''} · engine v${esc(context.engineVersion)}</sub></div>`
+    : `<div class="banner fail">██ PREFLIGHT: FAIL — do not queue this robot<sub>${sorted.filter((f) => f.severity === 'FAIL').length} blocking mismatch(es) · engine v${esc(context.engineVersion)}</sub></div>`
+  const cards = sorted.length === 0
+    ? '<div class="placeholder">Clean — every check passed with nothing to say. Go drive.</div>'
+    : sorted.map((f) => `
+      <div class="finding ${f.severity}">
+        <div class="msg"><span class="chip ${f.severity}">${f.severity}</span>${esc(f.message)}</div>
+        <div class="fix">${esc(f.fix)}</div>
+        ${f.evidence.length ? `<div class="ev">${f.evidence.map(esc).join(' · ')} <em>(${esc(f.checkId)} v${esc(f.checkVersion)})</em></div>` : `<div class="ev"><em>(${esc(f.checkId)} v${esc(f.checkVersion)})</em></div>`}
+      </div>`).join('')
+  $('results').innerHTML = `<h2>Preflight result</h2>${banner}${cards}`
+}
+</script>
+</body>
+</html>

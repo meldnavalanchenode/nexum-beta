@@ -1,0 +1,1051 @@
+#!/usr/bin/env node
+// PHYSYNC CLI — thin route layer; all logic in src/.
+//   physync check --config <config.xml> --code <TeamCodeDir> [--report out.md]
+//   physync snapshot --config <config.xml>       record the current PASS state
+//   physync diff --config <config.xml>           what changed since the snapshot
+//   physync pull [--host 192.168.43.1:5555]      pull configs off the hub via adb
+// Exit codes: 0 PASS · 1 could not run · 2 FAIL (CI-able).
+
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { parseConfigXml, toSnapshot } from '../src/configXml.js'
+import { scanCodeDir } from '../src/codeScan.js'
+import { reconcile, diffSnapshot, verdict } from '../src/engine.js'
+import { renderTerminal, renderMarkdown } from '../src/report.js'
+import { ENGINE_VERSION } from '../src/registry.js'
+import { parseStimulusReport, toStimulusBaseline, analyzeStimulus, diffStimulus, validateStimulusBaseline } from '../src/stimulus.js'
+import { parseRobotReport, toSensorBaseline, analyzeSensors, diffSensors, validateSensorBaseline } from '../src/sensors.js'
+import { buildApproval, validateApproval, compareApproval, verifyManifestHmac, newGateKey } from '../src/approval.js'
+import { checkMeta } from '../src/registry.js'
+import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode, STATUSES } from '../src/state.js'
+import { loadGraph, saveGraph, validateEdge, effectiveEdges } from '../src/graph.js'
+import { plan } from '../src/planner.js'
+import { loadReported, recordReported, reportedSince, asChange } from '../src/reported.js'
+import { loadTests, saveTests, validateTestDef, appendResult, loadResults, latestResults, detectRegressions } from '../src/results.js'
+import { loadFingerprintDefs } from '../src/fingerprints.js'
+import { parseInventory, toStateDevices } from '../src/inventory.js'
+import { RULE_PACKS, packEdges } from '../src/packs.js'
+
+const args = process.argv.slice(2)
+const cmd = args[0]
+const opt = (name, fallback = null) => {
+  const i = args.indexOf(`--${name}`)
+  if (i === -1) return fallback
+  const value = args[i + 1]
+  if (value == null || value.startsWith('--')) die(`--${name} needs a value.\n${usage}`)
+  return value
+}
+const usage = `usage:
+  physync check --config <config.xml> --code <TeamCodeDir> [--report out.md] [--json]
+  physync explain --config <config.xml> --code <TeamCodeDir>   (check + AI explanation; needs credentials + internet)
+  physync snapshot --config <config.xml>
+  physync diff --config <config.xml>
+  physync sensors  --file <physync-robot.json> [--baseline] [--json]
+  physync stimulus --file <physync-stimulus.json> [--baseline] [--json]
+  physync approve  --config <config.xml> --code <TeamCodeDir> [--robot <physync-robot.json>] [--name <activeConfigName>] [--force] [--json]
+  physync gate     --config <config.xml> [--file <physync-robot.json>] [--approval <path>] [--json]
+  physync state    --config <config.xml> --code <TeamCodeDir> [--robot <r.json>] [--stimulus <s.json>] [--json]   (save verified state VN — append-only)
+  physync state    --declare <inventory.json> [--stimulus <s.json>] [--json]   (non-FTC robots: baseline from a HAND-DECLARED device list — no reconciliation)
+  physync states   [--json]                                    (list verified state history)
+  physync status   --config <config.xml> --code <TeamCodeDir> [--robot <r.json>] [--json]   (vs latest state → changes, invalidated evidence, minimum revalidation; exit 0/2/3)
+  physync status   --declare <inventory.json> [--json]         (same, for a hand-declared robot)
+  physync rules    [--pack <name>] [--by <humanName>] [--json]  (list rule packs; --pack loads one as PROPOSED edges, inert until approved)
+  physync change   --component <node-id> --note <text> --by <name>                         (record a PHYSICAL change no file records — self-reported, never a detection)
+  physync change   --list                                                                  (list self-reported changes)
+  physync graph    [--json]                                    (list dependency edges: built-in + custom + proposed)
+  physync graph --propose --from <node> --to <node> [--note <why>]   (store a PROPOSED edge — never affects decisions until approved)
+  physync graph --approve <edgeId> --by <humanName>            (a named human makes a proposed edge real)
+  physync tests    [--define --id <id> --kind validation|robustness --label <text> [--min <n>] [--max <n>] --by <human>] [--json]
+  physync result   --test <id> [--value <n>] [--pass|--fail|--unknown] [--evidence <text>] [--notes <text>] --by <human>
+  physync results  [--test <id>] [--json]                      (result history + regression detection)
+  physync pull [--host 192.168.43.1:5555] [--out pulled/]`
+function die(msg) { console.error(msg); process.exit(1) }
+
+const KNOWN_FLAGS = {
+  check: ['config', 'code', 'report', 'json'],
+  explain: ['config', 'code'],
+  snapshot: ['config'],
+  diff: ['config', 'json'],
+  sensors: ['file', 'baseline', 'json'],
+  stimulus: ['file', 'baseline', 'json'],
+  approve: ['config', 'code', 'robot', 'name', 'force', 'json'],
+  gate: ['config', 'file', 'approval', 'json'],
+  state: ['config', 'code', 'robot', 'stimulus', 'declare', 'json'],
+  states: ['json'],
+  status: ['config', 'code', 'robot', 'declare', 'json'],
+  rules: ['pack', 'by', 'json'],
+  change: ['component', 'note', 'by', 'list', 'json'],
+  graph: ['propose', 'from', 'to', 'note', 'approve', 'by', 'json'],
+  tests: ['define', 'id', 'kind', 'label', 'min', 'max', 'by', 'json'],
+  result: ['test', 'value', 'pass', 'fail', 'unknown', 'evidence', 'notes', 'by', 'method', 'simulated'],
+  results: ['test', 'json'],
+  pull: ['host', 'out'],
+}
+// A misspelled flag is silently ignored by every naive CLI, which is how a user
+// ends up believing they recorded a baseline they did not.
+for (const a of args.slice(1)) {
+  if (!a.startsWith('--')) continue
+  const name = a.slice(2).split('=')[0]
+  const known = KNOWN_FLAGS[cmd] ?? []
+  if (!known.includes(name)) {
+    die(`Unknown flag "${a}" for \`physync ${cmd}\`. Valid: ${known.map((f) => '--' + f).join(', ') || '(none)'}\n${usage}`)
+  }
+}
+
+const SNAPSHOT = '.physync/snapshot.json'
+const STIMULUS_BASELINE = '.physync/stimulus-baseline.json'
+const SENSOR_BASELINE = '.physync/sensor-baseline.json'
+const APPROVED = '.physync/approved.json'
+const GATE_KEY = '.physync/gate.key'
+
+const loadConfig = () => {
+  const path = opt('config') ?? die(usage)
+  let model
+  try {
+    model = parseConfigXml(readFileSync(path, 'utf8'))
+  } catch (e) {
+    die(`Cannot read config: ${e.message}`)
+  }
+  if (!model.isFtcConfig) {
+    die(`${path} does not look like an FTC robot configuration (no <Robot> root) — point --config at the active configuration XML from /sdcard/FIRST/.`)
+  }
+  return model
+}
+
+const loadSnapshot = () => {
+  try {
+    const snap = JSON.parse(readFileSync(SNAPSHOT, 'utf8'))
+    if (!Array.isArray(snap.portals) || !Array.isArray(snap.devices)) throw new Error('wrong shape')
+    return snap
+  } catch (e) {
+    die(`Snapshot ${SNAPSHOT} is unreadable (${e.message}) — delete it and run \`physync snapshot\` again after your next verified PASS.`)
+  }
+}
+
+// Shared check pipeline — used by `check` and `explain`.
+function runCheck() {
+  const config = loadConfig()
+  const codeDir = opt('code') ?? die(usage)
+  if (!existsSync(codeDir)) die(`Code directory not found: ${codeDir}`)
+  if (!statSync(codeDir).isDirectory()) die(`--code must be a directory (got a file): ${codeDir}`)
+  if (config.devices.length === 0 && config.webcams.length === 0) die('No devices found in that config XML — is it the active configuration file?')
+  const configNames = new Set([...config.devices.map((d) => d.name), ...config.webcams.map((w) => w.name)])
+  const spaceByName = new Map(config.devices.map((d) => [d.name, d.space]))
+  const code = scanCodeDir(codeDir, configNames, spaceByName)
+  if (code.refs.length === 0) {
+    const hint = code.filesScanned === 0
+      ? (code.blkCount > 0 ? `${code.blkCount} Blocks (.blk) files scanned (identifier matching only).` : 'No Java/Kotlin sources found.')
+      : 'Sources found but no hardwareMap lookups recognized — unusual patterns? Config-side checks still ran.'
+    console.error(`⚠ No device references extracted. ${hint}`)
+  }
+  if (code.unreadable.length) console.error(`⚠ Could not read: ${code.unreadable.join(', ')}`)
+
+  const findings = reconcile(config, code)
+  if (existsSync(SNAPSHOT)) findings.push(...diffSnapshot(loadSnapshot(), toSnapshot(config)))
+  // No timestamp in context: identical inputs must produce byte-identical
+  // output (--json feeds CI caching and artifact diffing).
+  const context = {
+    deviceCount: config.devices.length,
+    webcamCount: config.webcams.length,
+    refCount: code.refs.length,
+    filesScanned: code.filesScanned,
+    blkCount: code.blkCount,
+    engineVersion: ENGINE_VERSION,
+  }
+  return { findings, context }
+}
+
+if (cmd === 'check') {
+  const { findings, context } = runCheck()
+  const reportPath = opt('report')
+  if (reportPath) {
+    try {
+      writeFileSync(reportPath, renderMarkdown(findings, context))
+    } catch (e) {
+      console.error(`⚠ Could not write report: ${e.message}`)
+    }
+  }
+  // --json: machine-readable output for CI gates (the enterprise thesis in
+  // miniature — same schema the deployment gate will speak).
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, verdict: verdict(findings), context, findings }, null, 2))
+    process.exit(verdict(findings) === 'PASS' ? 0 : 2)
+  }
+  console.log(renderTerminal(findings, context))
+  process.exit(verdict(findings) === 'PASS' ? 0 : 2)
+}
+
+if (cmd === 'explain') {
+  // Deterministic verdict FIRST — the AI layer is advisory only and can
+  // never touch it. AI failure changes nothing, including the exit code.
+  const { findings, context } = runCheck()
+  const v = verdict(findings)
+  console.log(renderTerminal(findings, context))
+  const { explainFindings } = await import('../src/assist.js')
+  const { sanitizeBlock } = await import('../src/text.js')
+  const result = await explainFindings({ verdict: v, findings, context })
+  console.log('  ── ADVISORY (AI) — explanation only, not part of the verdict ──')
+  // Model output is untrusted too (it may echo scanned strings): control
+  // bytes are neutralized before the terminal sees them.
+  console.log(result.ok ? sanitizeBlock(result.text).split('\n').map((l) => `  ${l}`).join('\n') : `  ${result.reason}`)
+  console.log('')
+  process.exit(v === 'PASS' ? 0 : 2)
+}
+
+if (cmd === 'sensors') {
+  const file = opt('file') ?? die(`sensors needs --file <physync-robot.json>\n${usage}`)
+  let report
+  try {
+    report = parseRobotReport(readFileSync(file, 'utf8'))
+  } catch (e) {
+    die(`Cannot read robot report: ${e.message}`)
+  }
+  if (args.includes('--baseline')) {
+    const answering = report.sensors.filter((s) => s.determinable && s.read === 'ok').length
+    if (answering === 0) {
+      die('Refusing to record a baseline in which no I2C sensor answered — nothing would be verifiable against it. (Digital and analog pins are excluded by design: their liveness cannot be determined.)')
+    }
+    mkdirSync('.physync', { recursive: true })
+    const written = toSensorBaseline(report)
+    writeFileSync(SENSOR_BASELINE, JSON.stringify(written, null, 2))
+    if (args.includes('--json')) {
+      console.log(JSON.stringify({ physync: 1, action: 'baseline-recorded', kind: 'sensors', recorded: written.sensors.length, path: SENSOR_BASELINE }, null, 2))
+    } else {
+      console.log(`Sensor baseline recorded: ${answering} answering I2C sensor(s) → ${SENSOR_BASELINE}`)
+      console.log('Record this only from a robot you have verified by hand — every later run is judged against it.')
+    }
+    process.exit(0)
+  }
+  let findings
+  if (existsSync(SENSOR_BASELINE)) {
+    let baseline
+    try {
+      baseline = validateSensorBaseline(JSON.parse(readFileSync(SENSOR_BASELINE, 'utf8')))
+    } catch (e) {
+      die(`Sensor baseline ${SENSOR_BASELINE} is unreadable (${e.message}) — delete it and re-record with --baseline.`)
+    }
+    findings = diffSensors(baseline, report)
+  } else {
+    console.error('⚠ No sensor baseline yet — reporting this run only. Record one from a hand-verified robot with --baseline to enable change detection.')
+    findings = analyzeSensors(report)
+  }
+  const context = { deviceCount: report.sensors.length, webcamCount: 0, refCount: 0, filesScanned: 0, mode: 'sensors', comparedToBaseline: existsSync(SENSOR_BASELINE), engineVersion: ENGINE_VERSION }
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, verdict: verdict(findings), context, findings }, null, 2))
+    process.exit(verdict(findings) === 'PASS' ? 0 : 2)
+  }
+  console.log(renderTerminal(findings, context))
+  process.exit(verdict(findings) === 'PASS' ? 0 : 2)
+}
+
+if (cmd === 'stimulus') {
+  const file = opt('file') ?? die(`stimulus needs --file <physync-stimulus.json>\n${usage}`)
+  let report
+  try {
+    report = parseStimulusReport(readFileSync(file, 'utf8'))
+  } catch (e) {
+    die(`Cannot read stimulus report: ${e.message}`)
+  }
+  const tested = report.motors.length + report.servos.length
+  if (args.includes('--baseline')) {
+    if (report.aborted) die('Refusing to record a baseline from an aborted pass — re-run the stimulus pass to completion on a robot you have verified by hand.')
+    const responsive = report.motors.filter((m) => m.result.startsWith('moved')).length
+    if (responsive === 0) die('Refusing to record a baseline in which no motor responded — nothing would be verifiable against it.')
+    // Overwriting a richer baseline with a thinner one silently flips real
+    // FAILs to PASS on every device that disappears, so it must be a decision,
+    // not a side effect.
+    if (existsSync(STIMULUS_BASELINE)) {
+      try {
+        const prior = validateStimulusBaseline(JSON.parse(readFileSync(STIMULUS_BASELINE, 'utf8')))
+        const lost = prior.motors.filter((m) => !report.motors.some((r) => r.name === m.name && r.result.startsWith('moved'))).map((m) => m.name)
+        if (lost.length) {
+          die(`Refusing to overwrite the existing baseline: it verifies ${lost.join(', ')}, which this pass did not. Recording it would silently stop checking ${lost.length === 1 ? 'that device' : 'those devices'}. Delete ${STIMULUS_BASELINE} first if that is genuinely what you want.`)
+        }
+      } catch (e) {
+        if (!/Refusing/.test(e.message)) console.error(`⚠ Existing baseline unreadable (${e.message}) — replacing it.`)
+      }
+    }
+    mkdirSync('.physync', { recursive: true })
+    const written = toStimulusBaseline(report)
+    writeFileSync(STIMULUS_BASELINE, JSON.stringify(written, null, 2))
+    if (args.includes('--json')) {
+      console.log(JSON.stringify({ physync: 1, action: 'baseline-recorded', kind: 'stimulus', motors: written.motors.length, servos: written.servos.length, path: STIMULUS_BASELINE }, null, 2))
+    } else {
+      console.log(`Stimulus baseline recorded: ${responsive} responding motor(s), ${report.servos.filter((s) => s.confirmed).length} confirmed servo(s) → ${STIMULUS_BASELINE}`)
+      console.log('Record this only from a robot you have verified by hand — every later run is judged against it.')
+    }
+    process.exit(0)
+  }
+  let findings
+  if (existsSync(STIMULUS_BASELINE)) {
+    let baseline
+    try {
+      baseline = validateStimulusBaseline(JSON.parse(readFileSync(STIMULUS_BASELINE, 'utf8')))
+    } catch (e) {
+      die(`Stimulus baseline ${STIMULUS_BASELINE} is unreadable (${e.message}) — delete it and re-record with --baseline.`)
+    }
+    findings = diffStimulus(baseline, report)
+  } else {
+    console.error('⚠ No stimulus baseline yet — reporting this run only. Record one from a hand-verified robot with --baseline to enable change detection.')
+    findings = analyzeStimulus(report)
+  }
+  const context = { deviceCount: tested, webcamCount: 0, refCount: 0, filesScanned: 0, mode: 'stimulus', comparedToBaseline: existsSync(STIMULUS_BASELINE), engineVersion: ENGINE_VERSION }
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, verdict: verdict(findings), context, findings }, null, 2))
+    process.exit(verdict(findings) === 'PASS' ? 0 : 2)
+  }
+  console.log(renderTerminal(findings, context))
+  process.exit(verdict(findings) === 'PASS' ? 0 : 2)
+}
+
+if (cmd === 'approve') {
+  // Approval means "tested and approved": the state must PASS the full check
+  // pipeline right now, or there is nothing here worth freezing.
+  const { findings, context } = runCheck()
+  if (verdict(findings) === 'FAIL') {
+    console.log(renderTerminal(findings, context))
+    die('Refusing to approve a FAILING state — fix the findings above first. Approval is a record that a human verified this robot, not a way to silence the check.')
+  }
+  const configPath = opt('config')
+  // Raw BYTES for hashing — utf8-decoding first collapsed invalid bytes to
+  // U+FFFD and produced a demonstrated wrong PASS on a byte-changed config.
+  const configBytes = readFileSync(configPath)
+  const configXml = configBytes.toString('utf8')
+  // The name the ROBOT enforces is the ACTIVE configuration name on the
+  // Driver Station — which equals the hub-side filename, not whatever this
+  // laptop copy happens to be called. A renamed download ("robot (1).xml")
+  // would bake in a name the robot can never match: a guaranteed false
+  // refusal. --name overrides; a suspicious basename gets a loud warning.
+  const derivedName = configPath.split('/').pop().replace(/\.xml$/i, '')
+  const configName = opt('name') ?? derivedName
+  if (!opt('name') && /\(\d+\)| copy$|^copy /i.test(derivedName)) {
+    console.error(`⚠ Config name recorded as "${derivedName}" — that looks like a duplicated download, not the name on the hub. If the active configuration on the Driver Station is called something else, re-run with --name <thatName>, or the on-robot gate will refuse a healthy robot.`)
+  }
+
+  let hubs = []
+  let hubsVerified = false
+  const robotPath = opt('robot')
+  if (robotPath) {
+    let robot
+    try {
+      robot = parseRobotReport(readFileSync(robotPath, 'utf8'))
+    } catch (e) {
+      die(`Cannot read robot report: ${e.message}`)
+    }
+    if (!Array.isArray(robot.hubs) || robot.hubs.length === 0) {
+      die('That robot report contains no hub census — re-run the PHYSYNC Preflight OpMode and pull a fresh physync-robot.json.')
+    }
+    // "Tested and approved" cannot mean "while holding a report that shows
+    // the robot broken." If the very report supplying the hub census carries
+    // failing sensors, approval is refused until the robot is actually fixed.
+    const health = analyzeSensors(robot)
+    if (verdict(health) === 'FAIL') {
+      const failing = health.filter((f) => f.severity === 'FAIL').map((f) => f.message)
+      die(`Refusing to approve: the robot report you supplied shows failures —\n  ${failing.join('\n  ')}\nFix the robot (or re-run the preflight if this is stale), then approve.`)
+    }
+    hubs = robot.hubs.map((h) => ({ address: h.address, firmware: String(h.firmware ?? '') }))
+    hubsVerified = true
+  }
+
+  // Provenance, not a metaphor: record which code was approved.
+  const codeDir = opt('code')
+  let codeGitSha = null
+  let codeGitDirty = null
+  try {
+    codeGitSha = execFileSync('git', ['-C', codeDir, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    codeGitDirty = execFileSync('git', ['-C', codeDir, 'status', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().length > 0
+  } catch { /* not a git repo — recorded as unknown, never guessed */ }
+
+  if (existsSync(APPROVED) && !args.includes('--force')) {
+    let prior = null
+    try { prior = JSON.parse(readFileSync(APPROVED, 'utf8')) } catch { /* unreadable prior — still require --force */ }
+    die(`An approval already exists${prior?.createdAt ? ` (recorded ${prior.createdAt})` : ''}. Replacing it re-baselines the gate — pass --force if this robot has been re-verified by hand.`)
+  }
+
+  mkdirSync('.physync', { recursive: true })
+  let key
+  if (existsSync(GATE_KEY)) {
+    key = readFileSync(GATE_KEY, 'utf8').trim()
+    // An empty or mangled key file used to slip through as falsy and write a
+    // silently UNSIGNED manifest — success banner and all. Corrupt key, loud stop.
+    if (!/^[0-9a-f]{64}$/.test(key)) {
+      die(`Gate key at ${GATE_KEY} is corrupt (not 64 hex chars). Delete it and approve again — a fresh key will be generated, and previously signed approvals will need re-approving.`)
+    }
+  } else {
+    key = newGateKey()
+    writeFileSync(GATE_KEY, key, { mode: 0o600 })
+  }
+
+  const manifest = buildApproval({
+    configName, configXml: configBytes, hubs, hubsVerified,
+    devices: parseConfigXml(configXml).devices.map((d) => ({ name: d.name, type: d.type, port: d.port, bus: d.bus ?? null })),
+    codeGitSha, codeGitDirty, engineVersion: ENGINE_VERSION, key,
+  })
+  writeFileSync(APPROVED, JSON.stringify(manifest, null, 2))
+
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, action: 'approved', configName, hubsVerified, hubs: manifest.hubs, stateDigest: manifest.stateDigest, codeGitSha, codeGitDirty, path: APPROVED }, null, 2))
+    process.exit(0)
+  }
+  console.log(`Approved: config "${configName}" (${manifest.devices.length} devices)${hubsVerified ? `, ${hubs.length} hub(s) with firmware` : ' — declaration layer only (no --robot report)'} → ${APPROVED}`)
+  if (codeGitSha) console.log(`Code at approval: ${codeGitSha.slice(0, 12)}${codeGitDirty ? ' (working tree DIRTY — the approved code may not be committed)' : ''}`)
+  if (!hubsVerified) console.log('To extend the gate to the physical layer: run the Preflight OpMode, then re-approve with --robot physync-robot.json.')
+  console.log(`To arm the on-robot gate: adb push ${APPROVED} /sdcard/FIRST/physync-approved.json`)
+  process.exit(0)
+}
+
+if (cmd === 'gate') {
+  const approvalPath = opt('approval', APPROVED)
+  const gateFindings = []
+  const mkFinding = (id, message, evidence, fix) => {
+    const meta = checkMeta(id)
+    return { checkId: id, checkVersion: meta.version, severity: meta.severity, message, evidence, fix }
+  }
+
+  let approval = null
+  if (!existsSync(approvalPath)) {
+    gateFindings.push(mkFinding('approval-missing', `No approval on record at ${approvalPath}`, [],
+      'Verify the robot by hand, then run `physync approve`. The gate fails closed: no approval means nothing to compare, and nothing to compare is not a PASS.'))
+  } else {
+    try {
+      approval = validateApproval(JSON.parse(readFileSync(approvalPath, 'utf8')))
+    } catch (e) {
+      approval = null
+      gateFindings.push(mkFinding('approval-missing', `Approval at ${approvalPath} is unreadable or corrupted: ${e.message}`, [],
+        'The gate fails closed on a manifest that cannot prove its own integrity. Re-verify the robot and run `physync approve` again.'))
+    }
+  }
+
+  if (approval) {
+    if (existsSync(GATE_KEY)) {
+      const key = readFileSync(GATE_KEY, 'utf8').trim()
+      if (!/^[0-9a-f]{64}$/.test(key)) {
+        die(`Gate key at ${GATE_KEY} is corrupt (not 64 hex chars). Delete it and re-approve to regenerate.`)
+      }
+      if (!verifyManifestHmac(approval, key)) {
+        gateFindings.push(mkFinding('approval-bad-signature', 'Approval signature does not verify with this laptop\'s gate key', [],
+          'This manifest was not signed by this laptop (or the key changed). If the approval is legitimate, re-approve here; provenance only, not a safety claim.'))
+      }
+    } else {
+      // A tampered manifest with honestly recomputed digests sails through
+      // digest self-consistency; only the HMAC catches it, and with no key
+      // that check silently didn't happen. That gap must be IN the verdict
+      // output, not buried on stderr.
+      gateFindings.push(mkFinding('approval-signature-unverified', 'No gate key on this laptop — approval provenance NOT verified (digest self-consistency only)', [],
+        'Run the gate on the laptop that approved (it holds .physync/gate.key), or accept that this manifest could have been rewritten by anyone with a copy of physync.'))
+    }
+
+    const configPath = opt('config') ?? die(`gate needs --config <config.xml> — the currently active configuration to compare against the approval.\n${usage}`)
+    let configBytes
+    try {
+      configBytes = readFileSync(configPath)
+    } catch (e) {
+      die(`Cannot read config: ${e.message}`)
+    }
+    const configName = configPath.split('/').pop().replace(/\.xml$/i, '')
+
+    let hubs = null
+    const filePath = opt('file')
+    if (filePath) {
+      try {
+        hubs = parseRobotReport(readFileSync(filePath, 'utf8')).hubs.map((h) => ({ address: h.address, firmware: String(h.firmware ?? '') }))
+      } catch (e) {
+        die(`Cannot read robot report: ${e.message}`)
+      }
+      // The verdict is exactly as fresh as this file. PHYSYNC cannot know
+      // when it was written (the hub has no trustworthy clock), so it says
+      // so instead of implying a live reading.
+      console.error('⚠ Verdict is as of the moment that robot report was written — for a fresh verdict, re-run the Preflight OpMode and pull a fresh physync-robot.json.')
+    } else if (approval.hubsVerified) {
+      // Fail closed, loudly: an approval that covers hubs cannot be "checked"
+      // while silently skipping the hub half.
+      die('This approval covers the hub layer — pass --file <physync-robot.json> from a fresh preflight run so the gate can actually check it. Checking half an approval and rendering a verdict would be a green light over a gap.')
+    }
+
+    gateFindings.push(...compareApproval(approval, { configName, configXml: configBytes, hubs }, checkMeta))
+  }
+
+  const context = {
+    deviceCount: approval?.devices?.length ?? 0, webcamCount: 0, refCount: 0, filesScanned: 0,
+    mode: 'gate', approvedAt: approval?.createdAt ?? 'never', hubsVerified: approval?.hubsVerified ?? false,
+    engineVersion: ENGINE_VERSION,
+  }
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, verdict: verdict(gateFindings), context, findings: gateFindings }, null, 2))
+    process.exit(verdict(gateFindings) === 'PASS' ? 0 : 2)
+  }
+  console.log(renderTerminal(gateFindings, context))
+  process.exit(verdict(gateFindings) === 'PASS' ? 0 : 2)
+}
+
+if (cmd === 'state') {
+  // Save the next verified state — append-only, never overwrites history.
+  //
+  // Two doors in. --config is the FTC one: a real configuration file off a real
+  // hub, reconciled against real source. --declare is for every robot PHYSYNC
+  // cannot read a configuration from (VEX V5 among them): a person writes down
+  // what is on the robot, and that list is recorded as a person's claim. The
+  // second door never borrows the first's evidence.
+  const declarePath = opt('declare')
+  let inventory = null
+  if (declarePath) {
+    if (opt('config') || opt('code')) die('--declare replaces --config/--code; a hand-declared inventory has nothing to reconcile against. Use one or the other.')
+    if (opt('robot')) die('--robot carries an FTC hub census, which a hand-declared robot has no equivalent of. Drop --robot.')
+    if (!existsSync(declarePath)) die(`Inventory file not found: ${declarePath}`)
+    try { inventory = parseInventory(readFileSync(declarePath, 'utf8'), { filename: declarePath }) } catch (e) { die(e.message) }
+  }
+
+  const { findings, context } = inventory ? { findings: [], context: null } : runCheck()
+  const v = inventory ? null : verdict(findings)
+  if (v === 'FAIL') {
+    console.log(renderTerminal(findings, context))
+    die('Refusing to save a verified state over a FAILING check — verification means a human vouched for a working robot.')
+  }
+  migrateLegacy('.', { engineVersion: ENGINE_VERSION })
+  const configPath = inventory ? declarePath : opt('config')
+  const configBytes = readFileSync(configPath)
+  const configName = configPath.split('/').pop().replace(/\.(xml|json)$/i, '')
+  let robot = null, stimulus = null
+  if (opt('robot')) {
+    try { robot = parseRobotReport(readFileSync(opt('robot'), 'utf8')) } catch (e) { die(`Cannot read robot report: ${e.message}`) }
+  }
+  if (opt('stimulus')) {
+    try { stimulus = parseStimulusReport(readFileSync(opt('stimulus'), 'utf8')) } catch (e) { die(`Cannot read stimulus report: ${e.message}`) }
+    if (stimulus.aborted) die('Refusing to fold an aborted stimulus pass into a verified state.')
+  }
+  const counts = { WARN: findings.filter((f) => f.severity === 'WARN').length, INFO: findings.filter((f) => f.severity === 'INFO').length }
+  // Recorded behavioral results newer than the previous baseline belong to
+  // THIS verification cycle — they fold in as human-recorded evidence.
+  const prior = latestState('.')
+  // Simulated results never fold into a verified state: demo data cannot
+  // become evidence about a real robot by being saved.
+  let cycleResults = [...latestResults(loadResults('.').filter((r) => r.simulated !== true), { after: prior?.createdAt }).values()]
+  // The same cutoff rule `status` enforces applies at the fold: a result
+  // recorded BEFORE a human-reported change that put its test in question
+  // describes a robot that no longer exists — folding it would launder the
+  // exact result status refuses to accept.
+  const absorbedReports = prior ? reportedSince(loadReported('.'), prior.createdAt).map(asChange) : []
+  let staleFolds = []
+  if (absorbedReports.length && cycleResults.length) {
+    const foldPlan = plan({ state: prior, changes: absorbedReports, graph: loadGraph('.') })
+    const reportAt = new Map(absorbedReports.map((c) => [c.id, c.at]))
+    const cutoffByTest = new Map()
+    for (const req of [...foldPlan.required, ...foldPlan.satisfiedThisRun]) {
+      const bare = req.action.startsWith('test:') ? req.action.slice(5) : req.action.startsWith('calibration:') ? req.action.slice(12) : null
+      if (bare == null) continue
+      const cut = (req.becauseIds ?? []).reduce((m, id) => { const t = reportAt.get(id); return t != null && t > m ? t : m }, '')
+      if (cut) cutoffByTest.set(bare, cut)
+    }
+    staleFolds = cycleResults.filter((r) => cutoffByTest.has(r.testId) && r.recordedAt <= cutoffByTest.get(r.testId))
+    cycleResults = cycleResults.filter((r) => !staleFolds.includes(r))
+  }
+  // And a FAIL never freezes into "verified" silently — the same rule the
+  // check verdict already gets, applied to behavioral results.
+  const failFolds = cycleResults.filter((r) => r.verdict === 'FAIL')
+  if (failFolds.length) {
+    die(`Refusing to save a verified state holding FAILING recorded results — ${failFolds.map((r) => `test:${r.testId}${r.value != null ? ` (${r.value})` : ''}`).join(', ')}.\nVerification means a human vouched for a working robot, not a frozen record of known defects. Record a passing re-run first, or an explicit --unknown with notes on what changed.`)
+  }
+  const state = buildVerifiedState({
+    version: nextVersion('.'), configName, configXml: configBytes,
+    robotId: inventory?.robotId ?? 'robot',
+    devices: inventory
+      ? toStateDevices(inventory)
+      : parseConfigXml(configBytes.toString('utf8')).devices.map((d) => ({ name: d.name, type: d.type, port: d.port, bus: d.bus ?? null })),
+    checkVerdict: v, checkFindingCounts: counts, robot, stimulus, results: cycleResults, engineVersion: ENGINE_VERSION,
+    ...(inventory ? { declaredBy: 'hand', declaredByHuman: inventory.declaredBy } : {}),
+  })
+  const path = saveState(state)
+  const unknowns = state.evidence.filter((e) => e.result === 'UNKNOWN').length
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, action: 'state-saved', version: state.version, path, evidence: state.evidence.length, unknown: unknowns, coverage: state.coverage, staleResultsNotFolded: staleFolds.map((r) => r.testId), absorbedReports: absorbedReports.length, ...(inventory ? { declaredBy: inventory.declaredBy, platform: inventory.platform, warnings: inventory.warnings } : {}) }, null, 2))
+    process.exit(0)
+  }
+  console.log(`Verified state V${state.version} saved → ${path}`)
+  console.log(`  evidence: ${state.evidence.length} items (${unknowns} UNKNOWN — stated, not hidden)`)
+  console.log(`  coverage: hubs ${state.coverage.hubs ? '✓' : '—'} · sensors ${state.coverage.sensors ? '✓' : '—'} · stimulus ${state.coverage.stimulus ? '✓' : '—'} · reconciled ${state.coverage.reconciled ? '✓' : '—'}`)
+  for (const r of staleFolds) {
+    console.log(`  ⚠ NOT folded: test:${r.testId} (${r.verdict}, ${r.recordedAt}) — recorded BEFORE a reported change put it in question; re-run it against the current robot.`)
+  }
+  if (absorbedReports.length) {
+    console.log(`  Note: ${absorbedReports.length} human-reported change(s) predate this save and are superseded by it — saving records a human's decision that V${state.version} is the verified robot now.`)
+  }
+  if (inventory) {
+    console.log(`\n  DECLARED BY HAND — ${inventory.platformLabel}, ${inventory.devices.length} devices, declared by ${inventory.declaredBy}.`)
+    console.log('  Nothing here was read off the robot and nothing was reconciled against your code.')
+    console.log('  This baseline records what a person SAYS is on the robot. Its value is as the')
+    console.log('  thing later changes are measured against — not as proof the robot matches it.')
+    for (const w of inventory.warnings) console.log(`    ⚠ ${w}`)
+  }
+  console.log('History is append-only: re-verifying later creates V' + (state.version + 1) + ', never edits V' + state.version + '.')
+  process.exit(0)
+}
+
+if (cmd === 'states') {
+  migrateLegacy('.', { engineVersion: ENGINE_VERSION })
+  const all = listStates('.')
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, states: all.map((s) => ({ version: s.version, createdAt: s.createdAt, origin: s.origin ?? 'native', configName: s.declared.configName, evidence: s.evidence.length, unknown: s.evidence.filter((e) => e.result === 'UNKNOWN').length, coverage: s.coverage })) }, null, 2))
+    process.exit(0)
+  }
+  if (!all.length) { console.log('No verified states yet — create one with `physync state` after a hand-verified PASS.'); process.exit(0) }
+  for (const s of all) {
+    console.log(`V${s.version} · ${s.createdAt} · config "${s.declared.configName}" · ${s.evidence.length} evidence (${s.evidence.filter((e) => e.result === 'UNKNOWN').length} UNKNOWN) · hubs ${s.coverage.hubs ? '✓' : '—'} sensors ${s.coverage.sensors ? '✓' : '—'} stimulus ${s.coverage.stimulus ? '✓' : '—'}${s.origin ? ` · ${s.origin}` : ''}`)
+  }
+  process.exit(0)
+}
+
+if (cmd === 'change') {
+  // A physical change nobody's files can see. This records a PERSON'S STATEMENT
+  // and labels it as one, for the whole life of the record.
+  if (args.includes('--list')) {
+    const reports = loadReported('.')
+    if (!reports.length) {
+      console.log('\n  No self-reported physical changes.\n  Record one: physync change --component camera-position --note "re-aimed the mount" --by <yourName>\n')
+      process.exit(0)
+    }
+    console.log('\n  SELF-REPORTED PHYSICAL CHANGES (a person\'s word, not a detection):\n')
+    for (const r of reports) {
+      console.log(`    ${r.id}  ${r.component}`)
+      console.log(`         reported by ${r.by} at ${r.at}${r.note ? ` — "${r.note}"` : ''}`)
+    }
+    console.log('')
+    process.exit(0)
+  }
+  const component = opt('component') ?? die('physync change needs --component <node-id> (for example: camera-position). See `physync graph` for the node vocabulary.')
+  const by = opt('by') ?? die('physync change needs --by <yourName> — a self-reported change is somebody\'s word, so the record says whose.')
+  let rec
+  try { rec = recordReported({ component, note: opt('note', ''), by }, '.') } catch (e) { die(e.message) }
+
+  console.log(`\n  Recorded ${rec.id}: ${rec.component}  [HUMAN-REPORTED CHANGE — human/self-reported by ${rec.by}]`)
+  if (rec.note) console.log(`    "${rec.note}"`)
+  console.log('\n  This is a REPORTED change, not a detected one. It is stored as your statement')
+  console.log('  about the robot and will select rechecks only through APPROVED graph edges.')
+
+  // Tell them immediately whether anything approved actually leads out of this
+  // node — so a report that changes nothing says so now, not silently later.
+  const g = loadGraph('.')
+  const out = [...g.builtin, ...g.custom.filter((e) => e.status !== 'proposed')]
+    .filter((e) => e.from === rec.component || (e.from.includes('$n') && rec.component.startsWith(e.from.split('$n')[0])))
+  const proposed = g.custom.filter((e) => e.status === 'proposed' && e.from === rec.component)
+  if (out.length) {
+    console.log(`\n  ${out.length} approved edge(s) lead out of "${rec.component}" — run \`physync status …\` to see the required rechecks.`)
+  } else {
+    console.log(`\n  ⚠ No APPROVED edge leads out of "${rec.component}", so this reports a change that`)
+    console.log('    invalidates nothing automatically. It will appear under NO DEPENDENCY MAPPING')
+    console.log('    for a human to judge.')
+    if (proposed.length) {
+      console.log(`\n    ${proposed.length} PROPOSED edge(s) exist from this node but are inactive until approved:`)
+      for (const e of proposed) console.log(`      ${e.id}: ${e.from} → ${e.to}   (physync graph --approve ${e.id} --by <name>)`)
+    }
+  }
+  console.log('')
+  process.exit(0)
+}
+
+if (cmd === 'status') {
+  // The new core question: this robot changed — what can we still trust?
+  migrateLegacy('.', { engineVersion: ENGINE_VERSION })
+  const base = latestState('.')
+  if (!base) die('No verified state on record — save one first: physync state --config <xml> --code <dir> [--robot r.json]\n  (hand-declared robots: physync state --declare <inventory.json>)')
+
+  const declarePath = opt('declare')
+  let inventory = null
+  if (declarePath) {
+    if (opt('config') || opt('code') || opt('robot')) die('--declare replaces --config/--code/--robot. Use one or the other.')
+    if (!existsSync(declarePath)) die(`Inventory file not found: ${declarePath}`)
+    try { inventory = parseInventory(readFileSync(declarePath, 'utf8'), { filename: declarePath }) } catch (e) { die(e.message) }
+  }
+  // A baseline and a candidate must be the same KIND of claim, or the diff
+  // between them is meaningless: comparing a parsed hub config against a
+  // hand-written list would report every device as changed.
+  const baseIsHand = base.declared.source === 'hand'
+  if (baseIsHand && !inventory) die(`V${base.version} was declared by hand — compare it with \`physync status --declare <inventory.json>\`, not --config.`)
+  if (!baseIsHand && inventory) die(`V${base.version} came from a parsed configuration file — compare it with \`physync status --config <xml> --code <dir>\`, not --declare.`)
+
+  const { findings, context } = inventory ? { findings: [], context: null } : runCheck()
+  const failFindings = findings.filter((f) => f.severity === 'FAIL').length
+  const configPath = inventory ? declarePath : opt('config')
+  const candidate = {
+    configName: configPath.split('/').pop().replace(/\.(xml|json)$/i, ''),
+    configXml: readFileSync(configPath),
+  }
+  if (opt('robot')) {
+    let robot
+    try { robot = parseRobotReport(readFileSync(opt('robot'), 'utf8')) } catch (e) { die(`Cannot read robot report: ${e.message}`) }
+    candidate.hubs = robot.hubs
+    candidate.sensors = robot.sensors
+    candidate.fingerprints = robot.fingerprints
+  }
+  candidate.devices = inventory
+    ? toStateDevices(inventory)
+    : parseConfigXml(candidate.configXml.toString('utf8')).devices.map((d) => ({ name: d.name, type: d.type, port: d.port, bus: d.bus ?? null }))
+  let fingerprintDefs = []
+  try { fingerprintDefs = loadFingerprintDefs('.') } catch (e) { die(e.message) }
+  const { changes, gaps, standing } = detectChanges(base, candidate, { fingerprintDefs })
+
+  // Self-reported physical changes made SINCE the baseline was saved. Older
+  // reports describe a robot that has since been re-verified, so they are
+  // history. These carry source 'human' all the way through and are rendered
+  // separately from anything detected.
+  const statusGraph = loadGraph('.')
+  const reported = reportedSince(loadReported('.'), base.createdAt).map(asChange)
+  changes.push(...reported)
+
+  // Phase 3: what did those changes invalidate, and what is the MINIMUM
+  // revalidation? Evidence re-derived by this very run counts as satisfied.
+  // Phase 4: recorded results newer than the baseline satisfy (PASS), doom
+  // (FAIL), or leave open (UNKNOWN) the demanded behavioral tests.
+  let revalidation = null
+  let resultFailures = 0
+  // Simulated results are excluded from satisfaction entirely (demo evidence
+  // cannot verify a real robot) but their presence is surfaced, not hidden.
+  const allResults = loadResults('.')
+  const realResults = allResults.filter((r) => r.simulated !== true)
+  const recent = latestResults(realResults, { after: base.createdAt })
+  const recentSimulated = latestResults(allResults.filter((r) => r.simulated === true), { after: base.createdAt })
+  const consumedTests = new Set()
+  if (changes.length) {
+    const satisfied = new Set()
+    // This run IS a fresh reconciliation — but only when one actually ran. A
+    // --declare run reconciles nothing, so an empty findings list must not be
+    // mistaken for a clean one. ('declare' is never auto-satisfied either: only
+    // a person walking the robot re-derives a hand-declared inventory.)
+    if (!inventory && failFindings === 0) satisfied.add('check')
+    if (candidate.hubs != null) satisfied.add('preflight')  // a robot report re-derives census + liveness
+    revalidation = plan({ state: base, changes, graph: statusGraph, satisfiedActions: satisfied })
+
+    // A result can only answer a change made before it was recorded. Human-
+    // reported changes carry the moment the change was made known; a PASS
+    // recorded before that moment describes the robot as it used to be.
+    // Detected changes have no knowable change time, so their cutoff stays
+    // the baseline (all that can honestly be enforced).
+    const reportedAt = new Map(changes.filter((c) => c.source === 'human' && c.at).map((c) => [c.id, c.at]))
+    const cutoffFor = (req) => (req.becauseIds ?? []).reduce((m, id) => { const t = reportedAt.get(id); return t != null && t > m ? t : m }, base.createdAt)
+    const stillRequired = []
+    for (const req of revalidation.required) {
+      const bareId = req.action.startsWith('test:') ? req.action.slice(5) : req.action.startsWith('calibration:') ? req.action.slice(12) : null
+      const recorded = bareId != null ? recent.get(bareId) : null
+      const simulatedOnly = bareId != null && !recorded ? recentSimulated.get(bareId) : null
+      if (bareId != null) consumedTests.add(bareId)
+      const cutoff = cutoffFor(req)
+      if (recorded && recorded.recordedAt <= cutoff) {
+        stillRequired.push({ ...req, label: `${req.label} — latest result (${recorded.verdict}, ${recorded.recordedAt}) PREDATES the reported change it must answer; re-run` })
+      } else if (recorded?.verdict === 'PASS') {
+        revalidation.satisfiedThisRun.push({ ...req, label: `${req.label} — PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}` })
+      } else if (recorded?.verdict === 'FAIL') {
+        resultFailures++
+        stillRequired.push({ ...req, label: `${req.label} — LATEST RESULT IS FAIL (${recorded.value ?? 'explicit'}, ${recorded.recordedAt})` })
+      } else if (simulatedOnly) {
+        stillRequired.push({ ...req, label: `${req.label} — only a SIMULATED result on file (${simulatedOnly.verdict}); simulated evidence satisfies nothing` })
+      } else {
+        stillRequired.push(req) // missing or UNKNOWN: still owed. UNKNOWN never passes.
+      }
+    }
+    revalidation.required = stillRequired
+  }
+  // A recorded FAIL is a standing fact about the robot whether or not any
+  // change demanded that test. Surfacing it only during revalidation let a
+  // known-failing robot read as VERIFIED with an unchanged config.
+  const standingFailures = [...recent.values()].filter((r) => r.verdict === 'FAIL' && !consumedTests.has(r.testId))
+  resultFailures += standingFailures.length
+  // Regressions are computed whether or not anything changed — hiding a real
+  // regression behind "no changes" was a lie of omission. Simulated results
+  // never enter the math.
+  const regressions = detectRegressions(realResults)
+
+  const status = deploymentStatus({ failFindings: failFindings + resultFailures, changes, gaps })
+  const out = { physync: 1, status, against: `V${base.version}`, failFindings, resultFailures, standingFailures, changes, gaps, standing, revalidation, regressions, exit: statusExitCode(status) }
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(out, null, 2))
+    process.exit(statusExitCode(status))
+  }
+  const paint = status === STATUSES.VERIFIED ? '\x1b[32m' : status === STATUSES.FAILED ? '\x1b[31m' : '\x1b[33m'
+  const reset = process.stdout.isTTY ? '\x1b[0m' : ''
+  console.log(`\n  ${process.stdout.isTTY ? paint : ''}██ ${status} ██${reset}   (vs verified state V${base.version}, ${base.createdAt})`)
+  // One-line situation summary — the Sentry rule: lead with what happened
+  // and what it costs, before any detail.
+  const sumBits = [
+    `${changes.length} change(s)`,
+    revalidation ? `${revalidation.invalidated.length} evidence item(s) put in question` : null,
+    revalidation ? `${revalidation.required.length} recheck(s) owed` : null,
+    resultFailures ? `${resultFailures} failing result(s)` : null,
+    gaps.length ? `${gaps.length} not compared` : null,
+  ].filter(Boolean)
+  console.log(`  ${sumBits.join(' · ')}\n`)
+  if (inventory) {
+    console.log(`  HAND-DECLARED ROBOT (${inventory.platformLabel}) — no configuration file was parsed and no`)
+    console.log('  code was reconciled. What follows compares your declaration against the one you')
+    console.log('  last saved, plus what people have reported. It establishes nothing about wiring.')
+    for (const w of inventory.warnings) console.log(`    ⚠ ${w}`)
+    console.log('')
+  }
+  if (failFindings) console.log(`  ✗ ${failFindings} FAILING check finding(s) — run \`physync check\` for the detail\n`)
+  if (resultFailures) console.log(`  ✗ ${resultFailures} test(s) whose LATEST RECORDED RESULT IS FAIL\n`)
+  if (standingFailures.length) {
+    console.log('  RECORDED FAILING RESULTS (standing — no change demanded these, they are simply failing):')
+    for (const r of standingFailures) console.log(`    ✗ test:${r.testId}${r.value != null ? ` = ${r.value}` : ''} — recorded ${r.recordedAt} by ${r.recordedBy}`)
+    console.log('')
+  }
+  for (const r of regressions) console.log(`  ⚠ REGRESSION: ${r.testId} ${r.previous.value} → ${r.current.value} (Δ ${+r.delta.toFixed(6)})`)
+  if (regressions.length) console.log("")
+  const detected = changes.filter((c) => c.source !== 'human')
+  const selfReported = changes.filter((c) => c.source === 'human')
+  if (detected.length) {
+    console.log('  WHAT CHANGED (detected by comparing files and reports):')
+    for (const c of detected) console.log(`    • [${c.source}/${c.method}] ${c.component}: ${c.previous ?? '(absent)'} → ${c.current ?? '(absent)'}`)
+    console.log('')
+  }
+  if (selfReported.length) {
+    console.log('  HUMAN-REPORTED CHANGE (not detected — nothing was measured):')
+    for (const c of selfReported) {
+      console.log(`    • [${c.source}/${c.method}] ${c.component} — reported by ${c.by}${c.note ? `: "${c.note}"` : ''}`)
+    }
+    console.log('')
+  }
+  if (gaps.length) {
+    console.log('  NOT COMPARED (evidence exists in the state, nothing supplied now):')
+    for (const g of gaps) console.log(`    ? ${g}`)
+    console.log('')
+  }
+  if (revalidation) {
+    if (revalidation.invalidated.length) {
+      console.log(`  INVALIDATED EVIDENCE (from V${base.version}):`)
+      for (const inv of revalidation.invalidated) console.log(`    ✝ ${inv.evidenceId} — because ${(inv.becauseHuman ?? inv.because).join('; ')}`)
+      console.log('')
+    }
+    if (revalidation.required.length) {
+      console.log('  REQUIRED REVALIDATION (minimum set, deduplicated):')
+      const edgeById = new Map([...statusGraph.builtin, ...statusGraph.custom].map((e) => [e.id, e]))
+      for (const r of revalidation.required) {
+        console.log(`    → ${r.label}`)
+        for (const t of r.targets) console.log(`        covers: ${t}`)
+        console.log(`        required because: ${(r.becauseHuman?.length ? r.becauseHuman : r.because).join('; ')}`)
+        // The PATH the demand traveled — who vouched for each hop. A user
+        // should never have to trust an unexplained conclusion.
+        const hops = (r.via ?? []).map((id) => edgeById.get(id)).filter(Boolean)
+        if (hops.length) console.log(`        path: ${hops.map((e) => `${e.from} → ${e.to} ${e.approvedBy ? `(approved by ${e.approvedBy})` : '(deterministic rule)'}`).join(' · ')}`)
+        // And the exact next command — an owed check should never leave the
+        // user wondering how to tell Nexum they did it.
+        const bare = r.action.startsWith('test:') ? r.action.slice(5) : r.action.startsWith('calibration:') ? r.action.slice(12) : null
+        if (bare) console.log(`        when done, record it: physync result --test ${bare} --value <n> --by <yourName>   (or --pass / --fail / --unknown)`)
+      }
+      console.log('')
+    }
+    if (revalidation.satisfiedThisRun.length) {
+      console.log('  SATISFIED BY THIS RUN:')
+      for (const r of revalidation.satisfiedThisRun) console.log(`    ✓ ${r.label}${/recorded/.test(r.label) ? '' : ' — re-derived from the inputs you just supplied'}`)
+      console.log('')
+    }
+    if (revalidation.unmappedChanges.length) {
+      console.log('  NO DEPENDENCY MAPPING (nothing invalidated automatically — review by hand):')
+      for (const u of revalidation.unmappedChanges) console.log(`    ⚠ ${u}`)
+      console.log('')
+    }
+    if (!revalidation.required.length && !revalidation.unmappedChanges.length) {
+      const rebase = inventory ? `physync state --declare ${declarePath}` : `physync state --config … --code …${candidate.hubs ? ' --robot …' : ''}`
+      console.log(`  All invalidated evidence was re-derived this run — save the new baseline: ${rebase}\n`)
+    }
+  }
+  if (standing.length) {
+    console.log('  STANDING EVIDENCE (valid until a change invalidates it):')
+    for (const s of standing) console.log(`    ≡ ${s}`)
+    console.log('')
+  }
+  if (status === STATUSES.VERIFIED) console.log('  Everything the verified state established still holds, as of the inputs you supplied.\n')
+  process.exit(statusExitCode(status))
+}
+
+if (cmd === 'rules') {
+  const packName = opt('pack')
+  if (!packName) {
+    if (args.includes('--json')) {
+      console.log(JSON.stringify({ physync: 1, packs: Object.entries(RULE_PACKS).map(([id, p]) => ({ id, label: p.label, note: p.note, edges: p.edges.length })) }, null, 2))
+      process.exit(0)
+    }
+    console.log('\n  RULE PACKS — candidate dependencies for a mentor to judge, never facts PHYSYNC asserts.\n')
+    for (const [id, p] of Object.entries(RULE_PACKS)) {
+      console.log(`    ${id}  —  ${p.label}  (${p.edges.length} edges)`)
+      console.log(`        ${p.note.replace(/(.{78}\S*)\s+/g, '$1\n        ')}\n`)
+    }
+    console.log('  Load one: physync rules --pack <name>   (loads every edge as PROPOSED — inactive)\n')
+    process.exit(0)
+  }
+
+  let edges
+  try { edges = packEdges(packName) } catch (e) { die(e.message) }
+  const g = loadGraph('.')
+  const existing = new Set(g.custom.map((e) => `${e.from}→${e.to}`))
+  const fresh = edges.filter((e) => !existing.has(`${e.from}→${e.to}`))
+  const skipped = edges.length - fresh.length
+  // Re-loading a pack must never resurrect an edge a mentor already approved,
+  // and must never quietly reset one they considered and left alone.
+  for (const e of fresh) validateEdge({ ...e, proposedAt: new Date().toISOString() }, { requireApproved: false })
+  saveGraph([...g.custom, ...fresh.map((e) => ({ ...e, proposedAt: new Date().toISOString() }))])
+
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, action: 'pack-loaded', pack: packName, proposed: fresh.length, skipped }, null, 2))
+    process.exit(0)
+  }
+  console.log(`\n  Loaded "${packName}" — ${fresh.length} edge(s) stored as PROPOSED${skipped ? `, ${skipped} already present and left untouched` : ''}.\n`)
+  for (const e of fresh) console.log(`    ${e.id}: ${e.from} → ${e.to}`)
+  console.log('\n  NONE of these affect anything yet. Each is a question for somebody who knows')
+  console.log('  your robot: "if this changed, would that need redoing?" Approve the ones that')
+  console.log('  are true of YOUR robot and leave the rest proposed — an unapproved edge is')
+  console.log('  never traversed, so leaving it costs nothing.\n')
+  console.log(`    physync graph --approve ${fresh[0]?.id ?? '<edgeId>'} --by <yourName>\n`)
+  process.exit(0)
+}
+
+if (cmd === 'graph') {
+  const g = loadGraph('.')
+  if (args.includes('--propose')) {
+    const from = opt('from') ?? die('--propose needs --from <node> and --to <node>')
+    const to = opt('to') ?? die('--propose needs --from <node> and --to <node>')
+    const edge = validateEdge({ id: `u${g.custom.length + 1}-${from.replace(/[^\w]/g, '_').slice(0, 20)}`, from, to, note: opt('note', ''), status: 'proposed', proposedAt: new Date().toISOString() })
+    saveGraph([...g.custom, edge])
+    console.log(`Proposed edge ${edge.id}: ${from} → ${to}`)
+    console.log('It is STORED but affects nothing until a named human approves it: physync graph --approve ' + edge.id + ' --by <yourName>')
+    process.exit(0)
+  }
+  if (opt('approve')) {
+    const by = opt('by') ?? die('--approve needs --by <humanName> — a human signature is what makes an edge real.')
+    const id = opt('approve')
+    const edge = g.custom.find((e) => e.id === id) ?? die(`No proposed edge "${id}" — see \`physync graph\`.`)
+    if (edge.status !== 'proposed') die(`Edge "${id}" is already approved.`)
+    edge.status = 'approved'
+    edge.source = 'user-approved'
+    edge.approvedBy = by
+    edge.approvedAt = new Date().toISOString()
+    validateEdge(edge)
+    saveGraph(g.custom)
+    console.log(`Edge ${id} approved by ${by}: ${edge.from} → ${edge.to} — it now affects invalidation and planning.`)
+    process.exit(0)
+  }
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, builtin: g.builtin, custom: g.custom }, null, 2))
+    process.exit(0)
+  }
+  console.log('DEPENDENCY GRAPH — edges that affect decisions carry provenance; proposed edges never do.\n')
+  console.log('  Built-in (deterministic rules — true by construction, no approval needed):')
+  for (const e of g.builtin) console.log(`    ${e.id}: ${e.from} → ${e.to}   (${e.note})`)
+  if (g.custom.length) {
+    console.log('\n  Custom:')
+    for (const e of g.custom) {
+      console.log(`    ${e.id}: ${e.from} → ${e.to}   [${e.status === 'proposed' ? 'PROPOSED — inactive' : `${e.source}, approved by ${e.approvedBy ?? 'n/a'}`}]${e.note ? ` (${e.note})` : ''}`)
+    }
+  } else {
+    console.log('\n  Custom: none — propose one with `physync graph --propose --from <node> --to <node>`,')
+    console.log('          or start from a pack: `physync rules` to list, `physync rules --pack vex-v5` to load.')
+  }
+  process.exit(0)
+}
+
+if (cmd === 'tests') {
+  const tests = loadTests('.')
+  if (args.includes('--define')) {
+    const id = opt('id') ?? die('--define needs --id <id>')
+    if (tests.some((t) => t.id === id)) die(`Test "${id}" is already defined.`)
+    const def = {
+      id, kind: opt('kind') ?? 'validation', label: opt('label') ?? die('--define needs --label <text>'),
+      definedBy: opt('by') ?? die('--define needs --by <human> — test definitions are engineering decisions with authors.'),
+      definedAt: new Date().toISOString(),
+    }
+    if (opt('min') != null || opt('max') != null) {
+      def.threshold = {}
+      if (opt('min') != null) def.threshold.min = Number(opt('min'))
+      if (opt('max') != null) def.threshold.max = Number(opt('max'))
+    }
+    validateTestDef(def)
+    saveTests([...tests, def])
+    console.log(`Defined ${def.kind} test "${id}" (${def.label})${def.threshold ? ` — threshold ${def.threshold.min != null ? '≥' + def.threshold.min : ''}${def.threshold.max != null ? '≤' + def.threshold.max : ''}, set by ${def.definedBy}` : ' — no threshold configured; results without an explicit verdict will be UNKNOWN'}`)
+    console.log(`Wire it into the graph so changes demand it: physync graph --propose --from <component> --to test:${id}`)
+    process.exit(0)
+  }
+  if (args.includes('--json')) { console.log(JSON.stringify({ physync: 1, tests }, null, 2)); process.exit(0) }
+  if (!tests.length) { console.log('No tests defined — define one with `physync tests --define --id <id> --kind validation|robustness --label "…" [--min 0.9] --by <you>`'); process.exit(0) }
+  for (const t of tests) {
+    console.log(`test:${t.id} [${t.kind}] "${t.label}"${t.threshold ? ` threshold ${t.threshold.min != null ? '≥' + t.threshold.min : ''}${t.threshold.max != null ? '≤' + t.threshold.max : ''} (${t.definedBy})` : ' (no threshold — explicit verdicts or UNKNOWN)'}`)
+  }
+  process.exit(0)
+}
+
+if (cmd === 'result') {
+  const testId = opt('test') ?? die('result needs --test <id>')
+  const def = loadTests('.').find((t) => t.id === testId) ?? null
+  if (!def) console.error(`⚠ test "${testId}" has no definition — recording anyway (kind defaults to validation, no threshold: verdict is explicit-or-UNKNOWN). Define it: physync tests --define --id ${testId} …`)
+  const explicit = args.includes('--pass') ? 'PASS' : args.includes('--fail') ? 'FAIL' : args.includes('--unknown') ? 'UNKNOWN' : null
+  const value = opt('value') != null ? Number(opt('value')) : null
+  if (opt('value') != null && Number.isNaN(value)) die('--value must be a number')
+  const entry = appendResult({
+    testId, def, value, explicit,
+    evidence: opt('evidence') ? [opt('evidence')] : [],
+    notes: opt('notes'), recordedBy: opt('by') ?? die('result needs --by <human> — PHYSYNC does not run behavioral tests; every result has a person behind it.'),
+    method: opt('method') ?? null,
+    simulated: args.includes('--simulated'),
+    againstState: latestState('.') ? `V${latestState('.').version}` : null,
+  })
+  console.log(`Recorded: test:${testId} → ${entry.verdict}${value != null ? ` (${value}${entry.threshold ? ` vs ${entry.threshold.min != null ? '≥' + entry.threshold.min : '≤' + entry.threshold.max}` : ', no threshold configured'})` : ''} — by ${entry.recordedBy}${entry.method ? ` · method: ${entry.method}` : ''}`)
+  if (entry.simulated) console.log('SIMULATED RESULT — recorded for demonstration or drill. It is stored and listed, and it satisfies NOTHING: simulated evidence cannot verify a real robot.')
+  if (entry.verdict === 'UNKNOWN' && value != null) console.log('No threshold and no explicit verdict → UNKNOWN. A number without a bar to clear proves nothing yet.')
+  const regs = detectRegressions(loadResults('.').filter((r) => r.simulated !== true)).filter((r) => r.testId === testId)
+  for (const r of regs) console.log(`⚠ REGRESSION: ${testId} ${r.previous.value} → ${r.current.value} (Δ ${r.delta > 0 ? '+' : ''}${+r.delta.toFixed(6)})`)
+  process.exit(entry.verdict === 'FAIL' ? 2 : 0)
+}
+
+if (cmd === 'results') {
+  const all = loadResults('.')
+  const filter = opt('test')
+  const shown = filter ? all.filter((r) => r.testId === filter) : all
+  // Simulated rows are listed — flagged, never hidden — but they enter no
+  // regression math: a drill number must not manufacture a phantom regression.
+  const regressions = detectRegressions(all.filter((r) => r.simulated !== true))
+  if (args.includes('--json')) { console.log(JSON.stringify({ physync: 1, results: shown, regressions }, null, 2)); process.exit(0) }
+  if (!shown.length) { console.log('No results recorded' + (filter ? ` for test "${filter}"` : '') + '.'); process.exit(0) }
+  for (const r of shown) {
+    console.log(`${r.recordedAt} · test:${r.testId} [${r.kind}] → ${r.verdict}${r.value != null ? ` (${r.value})` : ''}${r.simulated ? ' · SIMULATED (satisfies nothing)' : ''} · by ${r.recordedBy}${r.method ? ` · ${r.method}` : ''}${r.againstState ? ` · against ${r.againstState}` : ''}${r.evidence.length ? ` · evidence: ${r.evidence.join('; ')}` : ''}`)
+  }
+  for (const r of regressions.filter((x) => !filter || x.testId === filter)) {
+    console.log(`⚠ REGRESSION: ${r.testId} ${r.previous.value} → ${r.current.value} (Δ ${+r.delta.toFixed(6)}) · threshold verdict now ${r.thresholdVerdict}`)
+  }
+  process.exit(0)
+}
+
+if (cmd === 'snapshot') {
+  const config = loadConfig()
+  if (config.devices.length === 0) die('Refusing to snapshot a config with zero devices — an empty baseline makes every future diff pure noise.')
+  mkdirSync('.physync', { recursive: true })
+  writeFileSync(SNAPSHOT, JSON.stringify(toSnapshot(config), null, 2))
+  console.log(`Snapshot recorded: ${config.devices.length} devices, ${config.portals.length} portal(s) → ${SNAPSHOT}`)
+  process.exit(0)
+}
+
+if (cmd === 'diff') {
+  if (!existsSync(SNAPSHOT)) die('No snapshot yet — run `physync snapshot --config <xml>` after your next verified PASS.')
+  const config = loadConfig()
+  const findings = diffSnapshot(loadSnapshot(), toSnapshot(config))
+  const diffContext = { deviceCount: config.devices.length, webcamCount: config.webcams.length, refCount: 0, filesScanned: 0, mode: 'diff', engineVersion: ENGINE_VERSION }
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ physync: 1, verdict: verdict(findings), context: diffContext, findings }, null, 2))
+    process.exit(verdict(findings) === 'PASS' ? 0 : 2)
+  }
+  console.log(renderTerminal(findings, diffContext))
+  process.exit(verdict(findings) === 'PASS' ? 0 : 2)
+}
+
+if (cmd === 'pull') {
+  const host = opt('host', '192.168.43.1:5555')
+  const out = opt('out', 'pulled')
+  try {
+    execFileSync('adb', ['connect', host], { stdio: 'inherit' })
+    mkdirSync(out, { recursive: true })
+    execFileSync('adb', ['pull', '/sdcard/FIRST/', out], { stdio: 'inherit' })
+    console.log(`\nPulled hub files → ${out}/ — your active config XML is in there. Next: physync check --config ${out}/FIRST/<name>.xml --code <TeamCodeDir>`)
+    process.exit(0)
+  } catch (e) {
+    die(e.code === 'ENOENT'
+      ? 'adb not found — install Android platform-tools, or copy the config XML off the hub manually.'
+      : `adb failed (${e.message}) — is the laptop on the robot's Wi-Fi? Default host is 192.168.43.1:5555.`)
+  }
+}
+
+die(usage)
