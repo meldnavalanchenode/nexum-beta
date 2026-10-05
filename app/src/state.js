@@ -85,7 +85,7 @@ const evidence = (id, result, source, method, summary) => {
  *  the same door with no config file at all. When a second platform grows a
  *  real adapter, these parameters become an adapter-built observation
  *  bundle; the state format, digesting, and change detection do not move. */
-export function buildVerifiedState({ robotId = 'robot', version, configName, configXml, devices, checkVerdict, checkFindingCounts, robot, stimulus, results, engineVersion, now, declaredBy = 'xml-parse', declaredByHuman = null }) {
+export function buildVerifiedState({ robotId = 'robot', version, configName, configXml, devices, checkVerdict, checkFindingCounts, robot, stimulus, results, engineVersion, now, declaredBy = 'xml-parse', declaredByHuman = null, codeGit = null }) {
   if (!Number.isInteger(version) || version < 1) throw new Error('state version must be a positive integer')
   if (checkVerdict === 'FAIL') throw new Error('Refusing to build a verified state over a FAILING check — fix the findings, re-verify, then save the state.')
   if (declaredBy !== 'xml-parse' && declaredBy !== 'hand') throw new Error(`illegal declared-layer source "${declaredBy}"`)
@@ -173,7 +173,10 @@ export function buildVerifiedState({ robotId = 'robot', version, configName, con
     robotId,
     createdAt: now ?? new Date().toISOString(),
     engineVersion,
-    declared: { configName, configSha256: sha256(configXml), devices, source: declaredBy, ...(declaredByHuman ? { declaredBy: declaredByHuman } : {}) },
+    // codeGit records the SOFTWARE state the verification happened against —
+    // {sha, dirty} when the code dir is a git repo, absent otherwise (absence
+    // is honest ignorance, never a claim the code didn't change).
+    declared: { configName, configSha256: sha256(configXml), devices, source: declaredBy, ...(declaredByHuman ? { declaredBy: declaredByHuman } : {}), ...(codeGit?.sha ? { codeGit: { sha: codeGit.sha, dirty: codeGit.dirty === true } } : {}) },
     observed,
     coverage: {
       hubs: !!robot,
@@ -316,6 +319,15 @@ export function detectChanges(state, candidate, { now, fingerprintDefs = [] } = 
     }
   } else {
     gaps.push('configuration (no config supplied)')
+  }
+
+  // Software state — compared only when BOTH sides recorded a git sha (the
+  // UI can't know the code's repo; a missing side is ignorance, not a change).
+  if (candidate.codeGit?.sha && state.declared.codeGit?.sha && candidate.codeGit.sha !== state.declared.codeGit.sha) {
+    changes.push(change('software-changed', 'software',
+      state.declared.codeGit.sha.slice(0, 12) + (state.declared.codeGit.dirty ? ' (dirty)' : ''),
+      candidate.codeGit.sha.slice(0, 12) + (candidate.codeGit.dirty ? ' (dirty)' : ''),
+      'declared', 'git', now))
   }
 
   if (candidate.hubs != null) {

@@ -246,7 +246,11 @@ test('CLI: status shows invalidated evidence, the minimum plan, and satisfied-th
   assert.match(r.out, /Stimulus pass/)
   assert.ok(!/motor-response:claw/.test(r.out), 'a servo never owes a motor test')
   assert.match(r.out, /SATISFIED BY THIS RUN/)
-  assert.ok(!/motor-response:lift/.test(r.out), 'untouched evidence stays untouchable')
+  // untouched evidence now APPEARS — but only as explicitly APPLICABLE,
+  // never invalidated and never demanded
+  assert.match(r.out, /✓ APPLICABLE +motor-response:lift/)
+  assert.ok(!/✝ motor-response:lift/.test(r.out), 'untouched evidence is never invalidated')
+  assert.ok(!/covers: motor-response:lift/.test(r.out), 'untouched evidence is never demanded')
 })
 test('CLI: --json status carries the full revalidation object', () => {
   const dir = workspace()

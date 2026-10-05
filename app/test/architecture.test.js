@@ -21,7 +21,7 @@ const SRC = new URL('../src', import.meta.url).pathname
 // The platform-independent core: states, change detection, the dependency
 // graph, the planner, results, human reports, rule-pack data, and the
 // firmware-normalization boundary module.
-const CORE = ['state.js', 'planner.js', 'graph.js', 'results.js', 'reported.js', 'packs.js', 'firmware.js', 'inventory.js', 'fingerprints.js', 'text.js']
+const CORE = ['state.js', 'planner.js', 'graph.js', 'results.js', 'reported.js', 'packs.js', 'firmware.js', 'inventory.js', 'fingerprints.js', 'text.js', 'experiment.js']
 
 // FTC-specific (or FTC-product-specific) modules: parsers of FTC artifacts,
 // the reconciliation engine over them, the approval/gate wire format, and

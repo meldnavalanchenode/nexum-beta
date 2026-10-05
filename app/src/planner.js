@@ -13,7 +13,56 @@
 //      in the graph makes them a defined check; having no result makes them
 //      UNKNOWN, and UNKNOWN never passes silently.
 
-import { traverse } from './graph.js'
+import { traverse, matchNode, expandTarget, effectiveEdges } from './graph.js'
+
+// ── Machine-readable reason codes ───────────────────────────────────────────
+// The smallest taxonomy that covers every path a demand can actually travel in
+// this system. Each code is DERIVED from the why-trace the planner already
+// computes — never asserted independently of it — so a code can always be
+// expanded back into its edges and changes. Do not add codes speculatively:
+// a new code is justified only by a new kind of edge or change.
+export const REASON_CODES = {
+  DIRECT_COMPONENT_CHANGE: 'the changed component is what this evidence measured',
+  DEPENDENCY_CHANGED: 'a dependency of this evidence changed (via human-approved edges)',
+  CONFIGURATION_CHANGED: 'the declared configuration this evidence was derived from changed',
+  FIRMWARE_CHANGED: 'firmware changed after this evidence was collected',
+  SOFTWARE_CHANGED: 'the code\'s git commit moved after this evidence was collected',
+  PHYSICAL_CHANGE_REPORTED: 'a named person reported a physical change touching this evidence\'s dependencies',
+  MEASURED_DRIFT: 'a physical fingerprint drifted past its human-authored tolerance',
+  CALIBRATION_STALE: 'a calibration this evidence was validated through needs review',
+  INSUFFICIENT_EVIDENCE: 'a relationship has been proposed but no human has ruled on it',
+}
+
+/** Evidence ids whose re-derivation is the reconciliation itself. */
+const CONFIG_EVIDENCE = /^(config-parsed|config-code-reconciled|inventory-declared)$/
+
+/** Derive the single most specific reason code for one (evidence, trace)
+ *  pair. Precedence is from most to least physically specific; every branch
+ *  reads only facts already present in the trace. */
+export function reasonCodeFor(evidenceId, trace, changeById) {
+  const causes = [...trace.because].map((id) => changeById.get(id)).filter(Boolean)
+  // Most physically specific first; each branch reads only trace facts.
+  if (causes.some((c) => c.kind === 'fingerprint-drift')) return 'MEASURED_DRIFT'
+  if (causes.some((c) => c.kind === 'firmware-changed')) return 'FIRMWARE_CHANGED'
+  if (causes.some((c) => c.kind === 'physical-change-reported')) return 'PHYSICAL_CHANGE_REPORTED'
+  if (causes.some((c) => c.kind === 'software-changed')) return 'SOFTWARE_CHANGED'
+  // Demand that arrived FROM a calibration node: this evidence was validated
+  // through a calibration that is itself in doubt — the stale middleman is
+  // the useful fact. Nodes deeper down a chain get DEPENDENCY_CHANGED, which
+  // is also true and less specific.
+  if (!evidenceId.startsWith('calibration:') &&
+      [...(trace.fromNodes ?? [])].some((n) => n.startsWith('calibration:'))) {
+    return 'CALIBRATION_STALE'
+  }
+  if (CONFIG_EVIDENCE.test(evidenceId)) return 'CONFIGURATION_CHANGED'
+  // A built-in per-component family edge means the evidence IS about the
+  // changed component (motor entry → that motor's response).
+  if ([...trace.via].some((edgeId) => edgeId.startsWith('ftc:device-') || edgeId.startsWith('ftc:sensor-') ||
+      edgeId.startsWith('ftc:hub-') || edgeId.startsWith('generic:device-'))) {
+    return 'DIRECT_COMPONENT_CHANGE'
+  }
+  return 'DEPENDENCY_CHANGED'
+}
 
 /** Map a Phase-2 Change record to the component node ids it touches. */
 export function componentsOf(change) {
@@ -44,6 +93,12 @@ export function componentsOf(change) {
     // an unmapped change for a human to judge.
     case 'physical-change-reported':
       return [change.component]
+    // The code's git commit moved. 'software' is a graph node like any other:
+    // no built-in edges lead out of it (a fresh check re-derives the
+    // reconciliation anyway), but teams can approve edges like
+    // software → test:autonomous-run when their judgment says so.
+    case 'software-changed':
+      return ['software']
     // A physical fingerprint drifted past its AUTHORED tolerance — a MEASURED
     // physical change (gravity vector, tag pose). The component is already
     // the fingerprint node id; like every change, it reaches evidence only
@@ -82,9 +137,23 @@ export function describeChange(c) {
     case 'sensor-type-changed': return `${c.component} changed type: ${delta}`
     case 'sensor-response-lost': return `${c.component} stopped answering (was ${c.previous}, now reads ${c.current})`
     case 'fingerprint-drift': return `measured physical drift on ${c.component}${c.detail ? ` — ${c.detail}` : delta ? ` (${delta})` : ''}`
+    case 'software-changed': return `the code's git commit moved: ${delta}`
     default: return `${c.kind} (${c.component})`
   }
 }
+
+// ── Applicability + machine-readable reasons ────────────────────────────────
+// A check RESULT (PASS/FAIL/UNKNOWN) is what happened when the check ran — it
+// is historical and never changes. APPLICABILITY is whether that historical
+// result still describes TODAY'S robot, and it changes every time the robot
+// does. The two must never blur: yesterday's PASS stays PASS forever; what a
+// change touches is its applicability.
+export const APPLICABILITY = Object.freeze({
+  APPLICABLE: 'APPLICABLE',    // no known dependency connects it to any change
+  REVALIDATE: 'REVALIDATE',    // an ACTIVE dependency connects it to a change
+  UNKNOWN: 'UNKNOWN',          // only a PROPOSED (unapproved) dependency connects it — insufficient information, and saying so is the honest output
+  REDERIVED: 'RE-DERIVED',     // this very run's inputs re-established it
+})
 
 /** Group an evidence/artifact node id into the action that re-derives it.
  *
@@ -179,9 +248,14 @@ export function plan({ state, changes, graph, satisfiedActions = new Set() }) {
       invalidated.push({ evidenceId: nodeId, via: [...trace.via], because, becauseHuman })
     }
     const { action, label } = actionFor(nodeId)
-    if (!requirements.has(action)) requirements.set(action, { action, label, targets: [], because: new Set(), becauseHuman: new Set(), becauseIds: new Set(), via: new Set(), satisfied: satisfiedActions.has(action) })
+    if (!requirements.has(action)) requirements.set(action, { action, label, targets: [], because: new Set(), becauseHuman: new Set(), becauseIds: new Set(), via: new Set(), reasonCodes: new Set(), satisfied: satisfiedActions.has(action), rank: Infinity })
     const req = requirements.get(action)
+    req.reasonCodes.add(reasonCodeFor(nodeId, trace, changeById))
     req.targets.push(nodeId + (hasEvidence ? '' : ' (no recorded result — UNKNOWN)'))
+    // BFS insertion order in `reached` approximates dependency depth from the
+    // changed components — the earliest-reached target orders its action
+    // upstream of later ones (calibration before the test that consumes it).
+    req.rank = Math.min(req.rank, [...reached.keys()].indexOf(nodeId))
     for (const b of because) req.because.add(b)
     for (const b of becauseHuman) req.becauseHuman.add(b)
     for (const v of trace.via) req.via.add(v)
@@ -190,15 +264,75 @@ export function plan({ state, changes, graph, satisfiedActions = new Set() }) {
 
   const reachedNothing = changes.filter((c) => componentsOf(c).length > 0 && !productive.has(c.id))
 
+  const edgeById = new Map([...graph.builtin, ...graph.custom].map((e) => [e.id, e]))
+
   // becauseIds carries the raw change ids behind each requirement so callers
   // can ask time questions (was this result recorded AFTER the change it
   // answers?) without parsing the human-readable why-trace. via carries the
   // edge ids the demand traveled through, so renderers can show the PATH —
   // "camera-position → calibration → localization (approved by X)" — instead
-  // of asking users to trust an unexplained conclusion.
-  const required = [...requirements.values()].map((r) => ({ ...r, because: [...r.because], becauseHuman: [...r.becauseHuman], becauseIds: [...r.becauseIds], via: [...r.via] }))
+  // of asking users to trust an unexplained conclusion. rank orders the plan
+  // upstream-first (run the calibration before the test that consumes it).
+  const required = [...requirements.values()]
+    .map((r) => ({ ...r, because: [...r.because], becauseHuman: [...r.becauseHuman], becauseIds: [...r.becauseIds], via: [...r.via], reasonCodes: [...r.reasonCodes] }))
+    .sort((a, b) => a.rank - b.rank)
+    .map((r, i) => ({ ...r, order: i + 1 }))
+
+  // ── EVIDENCE APPLICABILITY — the honest classification of every piece of
+  // the baseline's historical evidence against today's changes. Results are
+  // history and never move; applicability is derived fresh every run:
+  //   REVALIDATE  reached through ACTIVE edges (builtin or human-approved)
+  //   RE-DERIVED  reached, but this very run's inputs re-established it
+  //   UNKNOWN     reached ONLY through PROPOSED (unapproved) edges — the
+  //               dependency question exists but no human has answered it;
+  //               claiming either APPLICABLE or REVALIDATE would be invented
+  //   APPLICABLE  no known dependency of any status connects it to a change
+  const reachedAll = changes.length ? traverse(graph, changedComponents, universe, { includeProposed: true }) : new Map()
+  // Folded calibration results live under `test:X` while graph demands name
+  // `calibration:X` — the same physical referent must classify together, or
+  // the table says "your calibration evidence is fine" beside a plan that
+  // says "redo that calibration".
+  const reachedFor = (map, id) => map.get(id) ?? (id.startsWith('test:') ? map.get(`calibration:${id.slice(5)}`) : undefined)
+  const applicability = state.evidence.map((e) => {
+    const active = reachedFor(reached, e.id)
+    const any = reachedFor(reachedAll, e.id)
+    if (active) {
+      const { action } = actionFor(e.id)
+      const rederived = satisfiedActions.has(action)
+      return {
+        evidenceId: e.id, result: e.result,
+        applicability: rederived ? APPLICABILITY.REDERIVED : APPLICABILITY.REVALIDATE,
+        reasonCodes: rederived ? [] : [reasonCodeFor(e.id, active, changeById)],
+        reason: rederived
+          ? 'reached by a change, but re-derived by the inputs this run supplied'
+          : [...active.because].map((id) => describeChange(changeById.get(id)) ?? id).join('; '),
+        via: [...active.via],
+      }
+    }
+    if (any) {
+      const proposedVia = [...any.via].filter((id) => edgeById.get(id)?.status === 'proposed')
+      if (proposedVia.length) {
+        return {
+          evidenceId: e.id, result: e.result,
+          applicability: APPLICABILITY.UNKNOWN,
+          reasonCodes: ['INSUFFICIENT_EVIDENCE'],
+          reason: `a PROPOSED (unapproved) dependency links it to ${[...any.because].map((id) => describeChange(changeById.get(id)) ?? id).join('; ')} — approve or reject the edge to resolve (physync graph --approve ${proposedVia[0]} --by <name>)`,
+          via: proposedVia,
+        }
+      }
+    }
+    return {
+      evidenceId: e.id, result: e.result,
+      applicability: APPLICABILITY.APPLICABLE,
+      reasonCodes: [],
+      reason: changes.length ? 'no known dependency connects it to any change' : 'nothing changed',
+      via: [],
+    }
+  })
+
   return {
     invalidated,
+    applicability,
     required: required.filter((r) => !r.satisfied),
     satisfiedThisRun: required.filter((r) => r.satisfied),
     unmappedChanges: [

@@ -16,7 +16,8 @@ import { buildApproval, validateApproval, compareApproval } from './approval.js'
 import { parseRobotReport, analyzeSensors } from './sensors.js'
 import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode } from './state.js'
 import { loadGraph, saveGraph, validateEdge, effectiveEdges, matchNode } from './graph.js'
-import { plan } from './planner.js'
+import { plan, APPLICABILITY } from './planner.js'
+import { markRevealed, closeExperiment } from './experiment.js'
 import { loadReported, recordReported, reportedSince, asChange } from './reported.js'
 import { loadTests, loadResults, latestResults, detectRegressions, appendResult } from './results.js'
 import { loadFingerprintDefs } from './fingerprints.js'
@@ -327,7 +328,13 @@ const server = createServer(async (req, res) => {
           if (bareId != null) consumedTests.add(bareId)
           const cutoff = cutoffFor(req2)
           if (recorded && recorded.recordedAt <= cutoff) stillRequired.push({ ...req2, label: `${req2.label} — latest result (${recorded.verdict}, ${recorded.recordedAt}) PREDATES the reported change it must answer; re-run` })
-          else if (recorded?.verdict === 'PASS') revalidation.satisfiedThisRun.push({ ...req2, label: `${req2.label} — PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}` })
+          else if (recorded?.verdict === 'PASS') {
+            revalidation.satisfiedThisRun.push({ ...req2, label: `${req2.label} — PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}` })
+            for (const t of req2.targets) {
+              const row = revalidation.applicability?.find((a) => a.evidenceId === t.replace(' (no recorded result — UNKNOWN)', ''))
+              if (row && row.applicability === APPLICABILITY.REVALIDATE) { row.applicability = APPLICABILITY.REDERIVED; row.reasonCodes = []; row.reason = `PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}` }
+            }
+          }
           else if (recorded?.verdict === 'FAIL') { resultFailures++; stillRequired.push({ ...req2, label: `${req2.label} — LATEST RESULT IS FAIL (${recorded.value ?? 'explicit'})` }) }
           else if (simulatedOnly) stillRequired.push({ ...req2, label: `${req2.label} — only a SIMULATED result on file (${simulatedOnly.verdict}); simulated evidence satisfies nothing` })
           else stillRequired.push(req2)
@@ -337,8 +344,15 @@ const server = createServer(async (req, res) => {
       const standingFailures = [...recent.values()].filter((r2) => r2.verdict === 'FAIL' && !consumedTests.has(r2.testId))
       resultFailures += standingFailures.length
       const status = deploymentStatus({ failFindings: failFindings + resultFailures, changes, gaps })
+      // same shadow-mode reveal semantics as the CLI — one project dir, one truth
+      const shadow = markRevealed({
+        changes,
+        planActions: revalidation ? revalidation.required.map((rq) => rq.action) : [],
+        applicabilityCounts: revalidation ? revalidation.applicability.reduce((m, a) => ({ ...m, [a.applicability]: (m[a.applicability] ?? 0) + 1 }), {}) : {},
+      }, '.')
       return json(res, 200, {
         status, against: `V${base.version}`, baseCreatedAt: base.createdAt,
+        experiment: shadow ? { id: shadow.id, predictedAt: shadow.predictedAt, revealedAt: shadow.revealedAt } : null,
         failFindings, resultFailures, standingFailures, changes, gaps, standing, revalidation,
         regressions: detectRegressions(realResults),
         findings: r.findings, context: r.context, exit: statusExitCode(status),
@@ -392,7 +406,8 @@ const server = createServer(async (req, res) => {
           robot: c.rep.report ?? undefined, results: cycleResults, engineVersion: ENGINE_VERSION,
         })
         saveState(state, '.')
-        return json(res, 200, { saved: true, version: state.version, evidence: state.evidence.length, unknown: state.evidence.filter((e) => e.result === 'UNKNOWN').length, coverage: state.coverage, staleResultsNotFolded: staleFolds.map((r2) => r2.testId), absorbedReports: absorbedReports.length })
+        const sealed = closeExperiment({ newStateVersion: state.version }, '.')
+        return json(res, 200, { saved: true, version: state.version, evidence: state.evidence.length, unknown: state.evidence.filter((e) => e.result === 'UNKNOWN').length, coverage: state.coverage, staleResultsNotFolded: staleFolds.map((r2) => r2.testId), absorbedReports: absorbedReports.length, experimentClosed: sealed?.id ?? null })
       } catch (e) {
         return json(res, 409, { error: e.message })
       }

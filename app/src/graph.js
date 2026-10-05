@@ -128,9 +128,16 @@ export function expandTarget(to, capture, universe) {
 
 /** Reachability: from a set of changed component ids, traverse effective
  *  edges (chains included, cycles safe) and return every reached node with
- *  its why-trace: which change ids started the path, via which edges. */
-export function traverse(graph, changedComponents, universe) {
-  const edges = effectiveEdges(graph)
+ *  its why-trace: which change ids started the path, via which edges.
+ *
+ *  includeProposed widens the walk to PROPOSED edges. That option exists for
+ *  exactly one caller: applicability classification, which uses the wider
+ *  reach to label evidence UNKNOWN ("a relationship has been suggested here
+ *  and nobody has ruled on it"). The law is unchanged — nothing reached only
+ *  through a proposed edge may be invalidated, demanded, or blocked on. A
+ *  proposed edge can lower confidence in a label; it can never cause work. */
+export function traverse(graph, changedComponents, universe, { includeProposed = false } = {}) {
+  const edges = includeProposed ? [...graph.builtin, ...graph.custom] : effectiveEdges(graph)
   const reached = new Map() // nodeId → { via: Set<edgeId>, because: Set<changeId> }
   const queue = []
   for (const { componentId, changeId } of changedComponents) {
@@ -146,10 +153,11 @@ export function traverse(graph, changedComponents, universe) {
       const capture = matchNode(edge.from, nodeId)
       if (capture === null) continue
       for (const target of expandTarget(edge.to, capture, universe)) {
-        if (!reached.has(target)) reached.set(target, { via: new Set(), because: new Set() })
+        if (!reached.has(target)) reached.set(target, { via: new Set(), because: new Set(), fromNodes: new Set() })
         const r = reached.get(target)
         r.via.add(edge.id)
         r.because.add(changeId)
+        r.fromNodes.add(nodeId) // the node this demand arrived FROM (reason-code derivation reads it)
         queue.push({ nodeId: target, changeId, path: [...path, edge.id] })
       }
     }

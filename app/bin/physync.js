@@ -19,8 +19,9 @@ import { buildApproval, validateApproval, compareApproval, verifyManifestHmac, n
 import { checkMeta } from '../src/registry.js'
 import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode, STATUSES } from '../src/state.js'
 import { loadGraph, saveGraph, validateEdge, effectiveEdges } from '../src/graph.js'
-import { plan } from '../src/planner.js'
+import { plan, APPLICABILITY } from '../src/planner.js'
 import { loadReported, recordReported, reportedSince, asChange } from '../src/reported.js'
+import { predict, markRevealed, debrief, assignVerdict, closeExperiment, openExperiment, listExperiments } from '../src/experiment.js'
 import { loadTests, saveTests, validateTestDef, appendResult, loadResults, latestResults, detectRegressions } from '../src/results.js'
 import { loadFingerprintDefs } from '../src/fingerprints.js'
 import { parseInventory, toStateDevices } from '../src/inventory.js'
@@ -58,6 +59,10 @@ const usage = `usage:
   physync tests    [--define --id <id> --kind validation|robustness --label <text> [--min <n>] [--max <n>] --by <human>] [--json]
   physync result   --test <id> [--value <n>] [--pass|--fail|--unknown] [--evidence <text>] [--notes <text>] --by <human>
   physync results  [--test <id>] [--json]                      (result history + regression detection)
+  physync predict  --checks "a, b, c" [--note <text>] --by <name>   (SHADOW MODE: record your plan BEFORE seeing Nexum's — immutable once revealed)
+  physync debrief  --checked "a, b" [--notes <text>] --by <name>    (after the work: what actually happened; deltas computed, never a verdict)
+  physync verdict  --verdict HELPED|"NO VALUE"|"EXTRA WORK"|MISSED|AMBIGUOUS --basis <protocol rule> --by <name>
+  physync experiment [--json]                                  (list shadow-mode records)
   physync pull [--host 192.168.43.1:5555] [--out pulled/]`
 function die(msg) { console.error(msg); process.exit(1) }
 
@@ -79,7 +84,39 @@ const KNOWN_FLAGS = {
   tests: ['define', 'id', 'kind', 'label', 'min', 'max', 'by', 'json'],
   result: ['test', 'value', 'pass', 'fail', 'unknown', 'evidence', 'notes', 'by', 'method', 'simulated'],
   results: ['test', 'json'],
+  predict: ['checks', 'note', 'by', 'abandon', 'json'],
+  debrief: ['checked', 'notes', 'by', 'json'],
+  verdict: ['verdict', 'basis', 'by', 'json'],
+  experiment: ['json'],
   pull: ['host', 'out'],
+}
+
+// Remembered inputs — after the first explicit run, `status`/`state` work
+// with no flags. Friction at the exact moment a robot just changed is the
+// product's enemy; UNKNOWN-by-absence is always preferred over demanding
+// full configuration, and reuse is always announced, never silent.
+const INPUTS_FILE = '.physync/inputs.json'
+const recallInputs = () => { try { return JSON.parse(readFileSync(INPUTS_FILE, 'utf8')) } catch { return {} } }
+const rememberInputs = (o) => { try { mkdirSync('.physync', { recursive: true }); writeFileSync(INPUTS_FILE, JSON.stringify(o, null, 2)) } catch { /* memory is a convenience, never a failure */ } }
+const reuseRememberedInputs = () => {
+  if (opt('declare') || opt('config')) return
+  const rem = recallInputs()
+  if (!rem.config) return
+  const reused = []
+  for (const k of ['config', 'code', 'robot', 'stimulus']) {
+    if (!opt(k) && rem[k] && existsSync(rem[k])) { args.push(`--${k}`, rem[k]); reused.push(`--${k} ${rem[k]}`) }
+  }
+  if (reused.length) console.log(`  (using remembered inputs: ${reused.join(' · ')} — pass flags to override)`)
+}
+
+/** The code's git state, when the code dir is a repo — honest null otherwise. */
+const gitStateOf = (dir) => {
+  if (!dir) return null
+  try {
+    const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    const dirty = execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().length > 0
+    return { sha, dirty }
+  } catch { return null }
 }
 // A misspelled flag is silently ignored by every naive CLI, which is how a user
 // ends up believing they recorded a baseline they did not.
@@ -479,6 +516,7 @@ if (cmd === 'gate') {
 }
 
 if (cmd === 'state') {
+  reuseRememberedInputs()
   // Save the next verified state — append-only, never overwrites history.
   //
   // Two doors in. --config is the FTC one: a real configuration file off a real
@@ -552,9 +590,15 @@ if (cmd === 'state') {
       ? toStateDevices(inventory)
       : parseConfigXml(configBytes.toString('utf8')).devices.map((d) => ({ name: d.name, type: d.type, port: d.port, bus: d.bus ?? null })),
     checkVerdict: v, checkFindingCounts: counts, robot, stimulus, results: cycleResults, engineVersion: ENGINE_VERSION,
+    codeGit: inventory ? null : gitStateOf(opt('code')),
     ...(inventory ? { declaredBy: 'hand', declaredByHuman: inventory.declaredBy } : {}),
   })
   const path = saveState(state)
+  // Remember the inputs so the NEXT run — the one that happens mid-panic
+  // after a robot change — needs zero flags.
+  if (!inventory && opt('config')) rememberInputs({ config: opt('config'), code: opt('code'), ...(opt('robot') ? { robot: opt('robot') } : {}), ...(opt('stimulus') ? { stimulus: opt('stimulus') } : {}) })
+  // A new verified state ends the workflow — seal any open shadow experiment.
+  const sealed = closeExperiment({ newStateVersion: state.version }, '.')
   const unknowns = state.evidence.filter((e) => e.result === 'UNKNOWN').length
   if (args.includes('--json')) {
     console.log(JSON.stringify({ physync: 1, action: 'state-saved', version: state.version, path, evidence: state.evidence.length, unknown: unknowns, coverage: state.coverage, staleResultsNotFolded: staleFolds.map((r) => r.testId), absorbedReports: absorbedReports.length, ...(inventory ? { declaredBy: inventory.declaredBy, platform: inventory.platform, warnings: inventory.warnings } : {}) }, null, 2))
@@ -576,7 +620,60 @@ if (cmd === 'state') {
     console.log('  thing later changes are measured against — not as proof the robot matches it.')
     for (const w of inventory.warnings) console.log(`    ⚠ ${w}`)
   }
+  if (sealed) console.log(`  Shadow experiment ${sealed.id} closed → V${state.version}${sealed.debrief ? '' : ' (NO DEBRIEF was recorded — the comparison data is incomplete)'}`)
   console.log('History is append-only: re-verifying later creates V' + (state.version + 1) + ', never edits V' + state.version + '.')
+  process.exit(0)
+}
+
+if (cmd === 'predict') {
+  if (args.includes('--abandon')) {
+    const e = closeExperiment({ abandoned: true }, '.')
+    if (!e) die('No open experiment to abandon.')
+    console.log(`Experiment ${e.id} abandoned (recorded, not deleted — abandonment is data too).`)
+    process.exit(0)
+  }
+  let rec
+  try { rec = predict({ checks: opt('checks'), note: opt('note') ?? '', by: opt('by'), baseline: latestState('.') ? `V${latestState('.').version}` : null }, '.') } catch (e) { die(e.message) }
+  console.log(`\n  SHADOW MODE armed: ${rec.id} — prediction by ${rec.predictedBy} recorded at ${rec.predictedAt}`)
+  if (rec.prediction.checks.length) console.log(`  predicted checks: ${rec.prediction.checks.join(' · ')}`)
+  if (rec.prediction.note) console.log(`  note: "${rec.prediction.note}"`)
+  console.log('  This prediction is IMMUTABLE once a status run reveals Nexum\'s answer.')
+  console.log('  Next: run physync status — then do the work — then physync debrief.\n')
+  process.exit(0)
+}
+
+if (cmd === 'debrief') {
+  let rec
+  try { rec = debrief({ checked: opt('checked'), notes: opt('notes') ?? '', by: opt('by') }, '.') } catch (e) { die(e.message) }
+  const d = rec.debrief.deltas
+  if (args.includes('--json')) { console.log(JSON.stringify({ physync: 1, experiment: rec }, null, 2)); process.exit(0) }
+  console.log(`\n  DEBRIEF ${rec.id} — team plan vs Nexum plan vs what actually happened (set facts only; the verdict is a human's job):`)
+  console.log(`    agreed (both named it):            ${d.agreed.join(', ') || '—'}`)
+  console.log(`    Nexum added beyond prediction:     ${d.nexumAddedBeyondPrediction.join(', ') || '—'}`)
+  console.log(`      …of which actually performed:    ${d.usefulAdditions.join(', ') || '—'}`)
+  console.log(`    prediction beyond Nexum:           ${d.predictionBeyondNexum.join(', ') || '—'}`)
+  console.log(`    recommended but not performed:     ${d.recommendedNotPerformed.join(', ') || '—'}   (EXTRA WORK candidates — human verdict decides)`)
+  console.log(`    performed though unrecommended:    ${d.performedUnrecommended.join(', ') || '—'}   (NEXUM MISSED candidates — human verdict decides)`)
+  console.log(`\n  Assign the verdict per ledger/SHADOW-PROTOCOL.md:`)
+  console.log('    physync verdict --verdict HELPED|"NO VALUE"|"EXTRA WORK"|MISSED|AMBIGUOUS --basis "<rule cited>" --by <you>')
+  console.log('  Then close the loop: perform owed checks, record results, physync state …\n')
+  process.exit(0)
+}
+
+if (cmd === 'verdict') {
+  let rec
+  try { rec = assignVerdict({ verdict: opt('verdict'), basis: opt('basis'), by: opt('by') }, '.') } catch (e) { die(e.message) }
+  console.log(`Verdict for ${rec.id}: ${rec.debrief.verdict} — ${rec.debrief.verdictBasis}`)
+  process.exit(0)
+}
+
+if (cmd === 'experiment') {
+  const all = listExperiments('.')
+  if (args.includes('--json')) { console.log(JSON.stringify({ physync: 1, experiments: all }, null, 2)); process.exit(0) }
+  if (!all.length) { console.log('No shadow-mode experiments recorded. Arm one BEFORE looking at status: physync predict --checks "a, b" --by <you>'); process.exit(0) }
+  for (const e of all) {
+    console.log(`${e.id} · predicted ${e.predictedAt} by ${e.predictedBy} · revealed ${e.revealedAt ?? '—'} · debriefed ${e.debriefedAt ?? '—'} · closed ${e.closedAt ?? 'OPEN'}${e.newState ? ` → ${e.newState}` : ''}${e.abandoned ? ' (abandoned)' : ''}${e.debrief?.verdict ? ` · verdict: ${e.debrief.verdict}` : ''}`)
+  }
   process.exit(0)
 }
 
@@ -644,6 +741,7 @@ if (cmd === 'change') {
 
 if (cmd === 'status') {
   // The new core question: this robot changed — what can we still trust?
+  reuseRememberedInputs()
   migrateLegacy('.', { engineVersion: ENGINE_VERSION })
   const base = latestState('.')
   if (!base) die('No verified state on record — save one first: physync state --config <xml> --code <dir> [--robot r.json]\n  (hand-declared robots: physync state --declare <inventory.json>)')
@@ -668,6 +766,7 @@ if (cmd === 'status') {
   const candidate = {
     configName: configPath.split('/').pop().replace(/\.(xml|json)$/i, ''),
     configXml: readFileSync(configPath),
+    codeGit: inventory ? null : gitStateOf(opt('code')),
   }
   if (opt('robot')) {
     let robot
@@ -732,6 +831,16 @@ if (cmd === 'status') {
         stillRequired.push({ ...req, label: `${req.label} — latest result (${recorded.verdict}, ${recorded.recordedAt}) PREDATES the reported change it must answer; re-run` })
       } else if (recorded?.verdict === 'PASS') {
         revalidation.satisfiedThisRun.push({ ...req, label: `${req.label} — PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}` })
+        // a fresh recorded PASS re-derives the evidence it covers — the
+        // applicability table must agree with the satisfaction decision
+        for (const t of req.targets) {
+          const row = revalidation.applicability?.find((a) => a.evidenceId === t.replace(' (no recorded result — UNKNOWN)', ''))
+          if (row && row.applicability === APPLICABILITY.REVALIDATE) {
+            row.applicability = APPLICABILITY.REDERIVED
+            row.reasonCodes = []
+            row.reason = `PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}`
+          }
+        }
       } else if (recorded?.verdict === 'FAIL') {
         resultFailures++
         stillRequired.push({ ...req, label: `${req.label} — LATEST RESULT IS FAIL (${recorded.value ?? 'explicit'}, ${recorded.recordedAt})` })
@@ -754,7 +863,15 @@ if (cmd === 'status') {
   const regressions = detectRegressions(realResults)
 
   const status = deploymentStatus({ failFindings: failFindings + resultFailures, changes, gaps })
-  const out = { physync: 1, status, against: `V${base.version}`, failFindings, resultFailures, standingFailures, changes, gaps, standing, revalidation, regressions, exit: statusExitCode(status) }
+  // SHADOW MODE reveal — the first status after a prediction stamps the
+  // moment Nexum's answer became visible, and snapshots that answer. The
+  // prediction is immutable from here on.
+  const shadow = markRevealed({
+    changes,
+    planActions: revalidation ? revalidation.required.map((r) => r.action) : [],
+    applicabilityCounts: revalidation ? revalidation.applicability.reduce((m, a) => ({ ...m, [a.applicability]: (m[a.applicability] ?? 0) + 1 }), {}) : {},
+  }, '.')
+  const out = { physync: 1, status, against: `V${base.version}`, failFindings, resultFailures, standingFailures, changes, gaps, standing, revalidation, regressions, experiment: shadow ? { id: shadow.id, predictedAt: shadow.predictedAt, revealedAt: shadow.revealedAt } : null, exit: statusExitCode(status) }
   if (args.includes('--json')) {
     console.log(JSON.stringify(out, null, 2))
     process.exit(statusExitCode(status))
@@ -807,17 +924,32 @@ if (cmd === 'status') {
     for (const g of gaps) console.log(`    ? ${g}`)
     console.log('')
   }
+  if (shadow?.revealedAt) {
+    console.log(`  SHADOW MODE — ${shadow.predictedBy}'s prediction locked at ${shadow.predictedAt}; Nexum's answer is revealed below.`)
+    console.log('  After performing the checks: physync debrief --checked "a, b" --by <you>\n')
+  }
   if (revalidation) {
     if (revalidation.invalidated.length) {
       console.log(`  INVALIDATED EVIDENCE (from V${base.version}):`)
       for (const inv of revalidation.invalidated) console.log(`    ✝ ${inv.evidenceId} — because ${(inv.becauseHuman ?? inv.because).join('; ')}`)
       console.log('')
     }
+    // Results are history and never change; APPLICABILITY answers "does that
+    // history still describe THIS robot?" — fresh every run, per evidence row.
+    if (revalidation.applicability?.length) {
+      const MARK = { [APPLICABILITY.APPLICABLE]: '✓', [APPLICABILITY.REVALIDATE]: '!', [APPLICABILITY.UNKNOWN]: '?', [APPLICABILITY.REDERIVED]: '↻' }
+      console.log('  EVIDENCE APPLICABILITY (historical results never change — this is what still describes TODAY\'S robot):')
+      for (const a of revalidation.applicability) {
+        const codes = a.reasonCodes?.length ? ` [${a.reasonCodes.join(', ')}]` : ''
+        console.log(`    ${MARK[a.applicability] ?? '·'} ${a.applicability.padEnd(11)} ${a.evidenceId} (${a.result} @V${base.version}) — ${a.reason}${codes}`)
+      }
+      console.log('')
+    }
     if (revalidation.required.length) {
-      console.log('  REQUIRED REVALIDATION (minimum set, deduplicated):')
+      console.log('  REQUIRED REVALIDATION (minimum set, ordered upstream-first — an upstream FAIL can make later checks moot):')
       const edgeById = new Map([...statusGraph.builtin, ...statusGraph.custom].map((e) => [e.id, e]))
       for (const r of revalidation.required) {
-        console.log(`    → ${r.label}`)
+        console.log(`    ${r.order}. ${r.label}${r.reasonCodes?.length ? `  [${r.reasonCodes.join(', ')}]` : ''}`)
         for (const t of r.targets) console.log(`        covers: ${t}`)
         console.log(`        required because: ${(r.becauseHuman?.length ? r.becauseHuman : r.because).join('; ')}`)
         // The PATH the demand traveled — who vouched for each hop. A user

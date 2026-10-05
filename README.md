@@ -45,8 +45,11 @@ of the robot you trust.
 re-flash — run:
 
 ```bash
-node app/bin/physync.js status --config yourconfig.xml --code YourTeamCode
+node app/bin/physync.js status
 ```
+
+(No flags needed — Nexum remembers the config and code paths from your
+baseline save and says so when it reuses them.)
 
 Nexum compares against your baseline and tells you: **what changed, what
 previous evidence that change put in question, and the minimum set of
@@ -68,6 +71,35 @@ node app/bin/physync.js result --test localization --value 0.96 --by yourName
 When everything owed is satisfied, save the new baseline (`state` again) —
 that's V2, and your robot's history is now two links long. There's also a
 local web view: `node app/src/server.js` → http://127.0.0.1:4620.
+
+## Surviving SCAN (the config-wipe problem)
+
+FTC's own workflow has a trap every veteran team knows: adding one device
+via **SCAN rewrites your entire configuration**. With Nexum the workflow
+becomes survivable and auditable:
+
+1. Before plugging in the new device: `node app/bin/physync.js state` —
+   freeze what you trust.
+2. Let SCAN do its destructive thing, add your device, save the new config.
+3. `node app/bin/physync.js status` — Nexum shows **exactly** what the
+   rescan changed: your new device, plus anything it silently renamed,
+   moved, or dropped — each with what it puts in question.
+
+No more hand-editing XML to protect your config from the official tool.
+
+## What each evidence row means after a change
+
+Historical results **never change** — a PASS from last week is a PASS
+forever, recorded against the state it belonged to. What changes is
+**applicability** — whether that old result still describes today's robot:
+
+- ✓ **APPLICABLE** — no known dependency connects it to any change
+- ! **REVALIDATE** — a change reached it through an approved dependency
+  (the reason and path are printed)
+- ? **UNKNOWN** — a *proposed* dependency links it, but no human has ruled
+  on that rule yet; Nexum refuses to guess (the output shows the exact
+  command to approve or reject the rule)
+- ↻ **RE-DERIVED** — this very run's inputs re-established it
 
 ## Plain-language glossary
 
