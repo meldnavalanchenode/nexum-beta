@@ -15,10 +15,11 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { compareFingerprints, validateFingerprintDef } from '../src/fingerprints.js'
 import { parseRobotReport } from '../src/sensors.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.json'), 'utf8'))
 
 const run = (dir, a) => {
@@ -97,8 +98,13 @@ test('drift beyond the authored tolerance is a MEASURED change and flows through
   assert.equal(drift.source, 'observed')
   assert.match(drift.detail, /yawDeg Δ6 > 2/)
   assert.match(drift.detail, /tolerance by Demo Mentor/)
-  // with nothing approved, the drift surfaces for hand review — never vanishes
-  assert.ok(j.revalidation.unmappedChanges.some((u) => u.includes('fingerprint:camera-pose:cam')))
+  // With nothing approved, the drift still refutes ITS OWN measurement — the
+  // identity relation needs no edge: the robot contradicted the very reference
+  // that row recorded. (So it is productive, and no longer "unmapped".)
+  const own = j.revalidation.applicability.find((a) => a.evidenceId === 'fingerprint:camera-pose:cam')
+  assert.equal(own.applicability, 'REVALIDATE')
+  assert.deepEqual(own.reasonCodes, ['MEASURED_DRIFT'])
+  assert.ok(j.revalidation.invalidated.some((i) => i.evidenceId === 'fingerprint:camera-pose:cam'))
   // approve the pack chain: measured drift now demands the calibration + test
   run(dir, ['rules', '--pack', 'camera-pose'])
   for (const id of ['camera-pose:02', 'camera-pose:03']) {
@@ -141,7 +147,12 @@ test('imu drift beyond per-key tolerance registers with the imu-mount pack chain
   let j = statusJson(dir)
   const drift = j.changes.find((c) => c.kind === 'fingerprint-drift' && c.component === 'fingerprint:imu-gravity')
   assert.ok(drift)
-  assert.equal(j.revalidation.required.length, 0, 'proposed imu-mount edges must do nothing yet')
+  // The PROPOSED chain contributes nothing — no calibration, no test. (The
+  // drift still owes a re-measurement of its own reference: that is the
+  // identity relation, which needs no edge and no approval.)
+  const before = j.revalidation.required.map((r) => r.action)
+  assert.ok(!before.some((a) => a.startsWith('calibration:') || a.startsWith('test:')),
+    `proposed imu-mount edges must demand nothing downstream — got ${before.join(', ')}`)
   run(dir, ['rules', '--pack', 'imu-mount'])
   for (const id of ['imu-mount:01', 'imu-mount:02']) run(dir, ['graph', '--approve', id, '--by', 'Demo Mentor (simulated)'])
   j = statusJson(dir)

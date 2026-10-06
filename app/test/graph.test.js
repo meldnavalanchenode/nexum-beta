@@ -13,12 +13,13 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { validateEdge, matchNode, expandTarget, traverse, loadGraph, saveGraph, effectiveEdges, BUILTIN_EDGES } from '../src/graph.js'
 import { componentsOf, actionFor, plan } from '../src/planner.js'
 import { buildVerifiedState, detectChanges } from '../src/state.js'
 import { ENGINE_VERSION } from '../src/registry.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 
 // ── provenance law ─────────────────────────────────────────────────────────
 test('provenance: an edge with unlisted provenance is rejected', () => {

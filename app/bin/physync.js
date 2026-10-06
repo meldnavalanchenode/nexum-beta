@@ -11,13 +11,14 @@ import { execFileSync } from 'node:child_process'
 import { parseConfigXml, toSnapshot } from '../src/configXml.js'
 import { scanCodeDir } from '../src/codeScan.js'
 import { reconcile, diffSnapshot, verdict } from '../src/engine.js'
+import { basename } from 'node:path'
 import { renderTerminal, renderMarkdown } from '../src/report.js'
 import { ENGINE_VERSION } from '../src/registry.js'
 import { parseStimulusReport, toStimulusBaseline, analyzeStimulus, diffStimulus, validateStimulusBaseline } from '../src/stimulus.js'
 import { parseRobotReport, toSensorBaseline, analyzeSensors, diffSensors, validateSensorBaseline } from '../src/sensors.js'
 import { buildApproval, validateApproval, compareApproval, verifyManifestHmac, newGateKey } from '../src/approval.js'
 import { checkMeta } from '../src/registry.js'
-import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode, STATUSES } from '../src/state.js'
+import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode, STATUSES, rederivedFrom } from '../src/state.js'
 import { loadGraph, saveGraph, validateEdge, effectiveEdges } from '../src/graph.js'
 import { plan, APPLICABILITY } from '../src/planner.js'
 import { loadReported, recordReported, reportedSince, asChange } from '../src/reported.js'
@@ -353,7 +354,7 @@ if (cmd === 'approve') {
   // laptop copy happens to be called. A renamed download ("robot (1).xml")
   // would bake in a name the robot can never match: a guaranteed false
   // refusal. --name overrides; a suspicious basename gets a loud warning.
-  const derivedName = configPath.split('/').pop().replace(/\.xml$/i, '')
+  const derivedName = basename(configPath).replace(/\.xml$/i, '')
   const configName = opt('name') ?? derivedName
   if (!opt('name') && /\(\d+\)| copy$|^copy /i.test(derivedName)) {
     console.error(`⚠ Config name recorded as "${derivedName}" — that looks like a duplicated download, not the name on the hub. If the active configuration on the Driver Station is called something else, re-run with --name <thatName>, or the on-robot gate will refuse a healthy robot.`)
@@ -479,7 +480,7 @@ if (cmd === 'gate') {
     } catch (e) {
       die(`Cannot read config: ${e.message}`)
     }
-    const configName = configPath.split('/').pop().replace(/\.xml$/i, '')
+    const configName = basename(configPath).replace(/\.xml$/i, '')
 
     let hubs = null
     const filePath = opt('file')
@@ -542,7 +543,7 @@ if (cmd === 'state') {
   migrateLegacy('.', { engineVersion: ENGINE_VERSION })
   const configPath = inventory ? declarePath : opt('config')
   const configBytes = readFileSync(configPath)
-  const configName = configPath.split('/').pop().replace(/\.(xml|json)$/i, '')
+  const configName = basename(configPath).replace(/\.(xml|json)$/i, '')
   let robot = null, stimulus = null
   if (opt('robot')) {
     try { robot = parseRobotReport(readFileSync(opt('robot'), 'utf8')) } catch (e) { die(`Cannot read robot report: ${e.message}`) }
@@ -606,6 +607,14 @@ if (cmd === 'state') {
   }
   console.log(`Verified state V${state.version} saved → ${path}`)
   console.log(`  evidence: ${state.evidence.length} items (${unknowns} UNKNOWN — stated, not hidden)`)
+  // A recorded FAIL is KEPT (hiding it would be worse) but it is never quiet,
+  // and status refuses to call this robot verified until it is re-derived.
+  const savedFailures = state.evidence.filter((e) => e.result === 'FAIL')
+  if (savedFailures.length) {
+    console.log(`  ✗ ${savedFailures.length} FAILING evidence row(s) recorded: ${savedFailures.map((e) => e.id).join(', ')}`)
+    console.log('    Kept as history — but this is a robot with a known defect, so `physync status`')
+    console.log(`    reports VALIDATION FAILED against V${state.version} until that evidence is re-derived passing.`)
+  }
   console.log(`  coverage: hubs ${state.coverage.hubs ? '✓' : '—'} · sensors ${state.coverage.sensors ? '✓' : '—'} · stimulus ${state.coverage.stimulus ? '✓' : '—'} · reconciled ${state.coverage.reconciled ? '✓' : '—'}`)
   for (const r of staleFolds) {
     console.log(`  ⚠ NOT folded: test:${r.testId} (${r.verdict}, ${r.recordedAt}) — recorded BEFORE a reported change put it in question; re-run it against the current robot.`)
@@ -764,7 +773,7 @@ if (cmd === 'status') {
   const failFindings = findings.filter((f) => f.severity === 'FAIL').length
   const configPath = inventory ? declarePath : opt('config')
   const candidate = {
-    configName: configPath.split('/').pop().replace(/\.(xml|json)$/i, ''),
+    configName: basename(configPath).replace(/\.(xml|json)$/i, ''),
     configXml: readFileSync(configPath),
     codeGit: inventory ? null : gitStateOf(opt('code')),
   }
@@ -810,8 +819,11 @@ if (cmd === 'status') {
     // mistaken for a clean one. ('declare' is never auto-satisfied either: only
     // a person walking the robot re-derives a hand-declared inventory.)
     if (!inventory && failFindings === 0) satisfied.add('check')
-    if (candidate.hubs != null) satisfied.add('preflight')  // a robot report re-derives census + liveness
-    revalidation = plan({ state: base, changes, graph: statusGraph, satisfiedActions: satisfied })
+    // NOT satisfied.add('preflight'): that asserted a fresh report re-derived
+    // every census/liveness row, including ones it omitted or showed failing.
+    // Re-derivation is decided per row, by what the report actually says.
+    const rederivedTargets = rederivedFrom(base, candidate, changes)
+    revalidation = plan({ state: base, changes, graph: statusGraph, satisfiedActions: satisfied, rederivedTargets })
 
     // A result can only answer a change made before it was recorded. Human-
     // reported changes carry the moment the change was made known; a PASS
@@ -857,6 +869,11 @@ if (cmd === 'status') {
   // known-failing robot read as VERIFIED with an unchanged config.
   const standingFailures = [...recent.values()].filter((r) => r.verdict === 'FAIL' && !consumedTests.has(r.testId))
   resultFailures += standingFailures.length
+  // A baseline written before FAIL evidence was refused at build time (or by
+  // an older engine) must not keep reading as VERIFIED. The row is history
+  // and stays history; the STATUS stops claiming the robot is fine.
+  const baselineFailures = base.evidence.filter((e) => e.result === 'FAIL').map((e) => e.id)
+  resultFailures += baselineFailures.length
   // Regressions are computed whether or not anything changed — hiding a real
   // regression behind "no changes" was a lie of omission. Simulated results
   // never enter the math.
@@ -866,9 +883,17 @@ if (cmd === 'status') {
   // SHADOW MODE reveal — the first status after a prediction stamps the
   // moment Nexum's answer became visible, and snapshots that answer. The
   // prediction is immutable from here on.
-  const shadow = markRevealed({
+  // Nexum's answer is required PLUS satisfiedThisRun: a check it demanded
+  // that the team had already done is still a check it named. Recording only
+  // `required` scored those as "the team went beyond Nexum" and manufactured
+  // MISSED verdicts against ourselves — corrupting the experiment in our own
+  // disfavour, which is still corrupt.
+  // And a run with NO changes has no answer to reveal; stamping it would
+  // freeze the snapshot as "Nexum recommended nothing" before the real
+  // comparison ever happened (first reveal wins, permanently).
+  const shadow = changes.length === 0 ? null : markRevealed({
     changes,
-    planActions: revalidation ? revalidation.required.map((r) => r.action) : [],
+    planActions: revalidation ? [...revalidation.required, ...revalidation.satisfiedThisRun].map((r) => r.action) : [],
     applicabilityCounts: revalidation ? revalidation.applicability.reduce((m, a) => ({ ...m, [a.applicability]: (m[a.applicability] ?? 0) + 1 }), {}) : {},
   }, '.')
   const out = { physync: 1, status, against: `V${base.version}`, failFindings, resultFailures, standingFailures, changes, gaps, standing, revalidation, regressions, experiment: shadow ? { id: shadow.id, predictedAt: shadow.predictedAt, revealedAt: shadow.revealedAt } : null, exit: statusExitCode(status) }

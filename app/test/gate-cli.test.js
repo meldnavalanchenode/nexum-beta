@@ -9,9 +9,10 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { validateApproval } from '../src/approval.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const SCRIPT = join(APP, 'bin/physync.js')
 
 const CONFIG = `<Robot type="FirstInspires-FTC"><LynxUsbDevice name="P" serialNumber="X" parentModuleAddress="173"><LynxModule name="Control Hub" port="173"><goBILDA5202SeriesMotor name="left_drive" port="0" /><Servo name="claw" port="0" /></LynxModule></LynxUsbDevice></Robot>`

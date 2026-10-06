@@ -7,10 +7,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { fileURLToPath } from 'node:url'
 
 const PORT = 4700 + (process.pid % 200)
 const BASE = `http://127.0.0.1:${PORT}`
-const SERVER = new URL('../src/server.js', import.meta.url).pathname
+const SERVER = fileURLToPath(new URL('../src/server.js', import.meta.url))
 
 const CONFIG = '<Robot type="FirstInspires-FTC"><LynxUsbDevice name="P" serialNumber="X" parentModuleAddress="173"><LynxModule name="Control Hub" port="173"><goBILDA5202SeriesMotor name="left_drive" port="0" /><Servo name="claw" port="1" /></LynxModule></LynxUsbDevice></Robot>'
 const GOOD_CODE = [{ name: 'T.java', content: 'class T { void i(HardwareMap hardwareMap){ a = hardwareMap.get(DcMotor.class, "left_drive"); b = hardwareMap.get(Servo.class, "claw"); } }' }]

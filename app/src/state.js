@@ -166,6 +166,13 @@ export function buildVerifiedState({ robotId = 'robot', version, configName, con
     }
   }
 
+  // A FAIL row is RECORDED, never hidden — a baseline that honestly says "the
+  // IMU was dead when we froze this" is worth more than a refusal that makes
+  // the team save nothing. What must never happen is the SECOND half: such a
+  // state used to render "VERIFIED FOR DEFINED CHECKS" forever, because the
+  // status computation had no input for failing baseline evidence. The claim
+  // is what gets refused (see `baselineFailures` in the status pipeline), not
+  // the record.
   const state = {
     physyncState: 1,
     format: STATE_FORMAT,
@@ -285,6 +292,39 @@ const change = (kind, component, previous, current, source, method, at) => ({
 /** Compare the latest verified state against a candidate collection.
  *  candidate = { configName?, configXml?, hubs?, sensors? } — anything absent
  *  is reported as a coverage gap, never assumed unchanged. */
+/**
+ * Which baseline evidence ids did THIS run's inputs genuinely re-establish?
+ *
+ * Deliberately conservative: a row counts as re-derived only when the fresh
+ * observation produces the same PASSING fact again. A report that omits a
+ * sensor, shows it erroring, reads all-zeros, or that re-measured a
+ * fingerprint and found it drifted re-derives NOTHING about that row — the
+ * baseline's PASS stays in doubt and its recheck stays owed. (Supplying a
+ * robot report used to satisfy the whole preflight family wholesale, which
+ * relabelled refuted and missing evidence as "re-derived by this run".)
+ */
+export function rederivedFrom(state, candidate, changes = []) {
+  const out = new Set()
+  if (candidate.hubs == null) return out
+  // The census is re-derived only when nothing about the hubs moved: a
+  // vanished hub or changed firmware means the fresh census CONTRADICTS the
+  // row rather than confirming it.
+  const hubsDisturbed = changes.some((c) => /^(hub-missing|hub-added|firmware-changed)$/.test(c.kind))
+  if (!hubsDisturbed && candidate.hubs.length) out.add('hub-census')
+  for (const s of candidate.sensors ?? []) {
+    // determinable + answered = a fresh PASS for that sensor. Anything else
+    // (zeros, error, a hub pin whose liveness is never determinable) is a
+    // fresh UNKNOWN or FAIL, which re-derives no prior PASS.
+    if (s.determinable && s.read === 'ok') out.add(`sensor-liveness:${s.name}`)
+  }
+  const drifted = new Set(changes.filter((c) => c.kind === 'fingerprint-drift').map((c) => c.component))
+  for (const f of candidate.fingerprints ?? []) {
+    const id = `fingerprint:${f.id}`
+    if (!drifted.has(id)) out.add(id)
+  }
+  return out
+}
+
 export function detectChanges(state, candidate, { now, fingerprintDefs = [] } = {}) {
   const changes = []
   const gaps = []

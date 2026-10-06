@@ -12,12 +12,13 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   validateTestDef, loadTests, saveTests, resultVerdict, appendResult, loadResults,
   latestResults, detectRegressions, LEDGER_FILE,
 } from '../src/results.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 
 // ── definitions ────────────────────────────────────────────────────────────
 test('definitions: a threshold without an author is rejected — decisions have names', () => {

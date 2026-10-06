@@ -10,11 +10,12 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseConfigXml, portSpace, toSnapshot } from '../src/configXml.js'
 import { scanJavaSource } from '../src/codeScan.js'
 import { reconcile, diffSnapshot, verdict } from '../src/engine.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const wrap = (devices, portalAttrs = 'name="P" serialNumber="X" parentModuleAddress="173"', hubs = null) =>
   `<Robot type="FirstInspires-FTC"><LynxUsbDevice ${portalAttrs}>${hubs ?? `<LynxModule name="Control Hub" port="173">${devices}</LynxModule>`}</LynxUsbDevice></Robot>`
 const audit = (xml, code = {}) => reconcile(parseConfigXml(xml), { refs: [], dynamic: [], blocksUnknown: [], filesScanned: 1, ...code })

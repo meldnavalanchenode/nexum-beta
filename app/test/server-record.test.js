@@ -11,11 +11,12 @@ import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const PORT = 4700 + (process.pid % 90)
 const BASE = `http://127.0.0.1:${PORT}`
-const SERVER = new URL('../src/server.js', import.meta.url).pathname
-const APP = new URL('..', import.meta.url).pathname
+const SERVER = fileURLToPath(new URL('../src/server.js', import.meta.url))
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const DIR = mkdtempSync(join(tmpdir(), 'physync-srvrec-'))
 
 const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.json'), 'utf8'))

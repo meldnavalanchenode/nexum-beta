@@ -15,8 +15,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const SRC = new URL('../src', import.meta.url).pathname
+const SRC = fileURLToPath(new URL('../src', import.meta.url))
 
 // The platform-independent core: states, change detection, the dependency
 // graph, the planner, results, human reports, rule-pack data, and the
@@ -30,6 +31,26 @@ const ADAPTER = ['configXml.js', 'codeScan.js', 'sensors.js', 'stimulus.js', 'en
 
 const localImports = (file) =>
   [...readFileSync(join(SRC, file), 'utf8').matchAll(/^import\s.*?from\s+'\.\/([^']+)'/gm)].map((m) => m[1])
+
+// Windows law: `new URL(…).pathname` yields "/C:/…" on Windows — the leading
+// slash makes every path built from it invalid. Node ships fileURLToPath
+// precisely for this. School laptops are Windows, so this is a correctness
+// rule, not a style preference.
+test('no module converts a file URL with .pathname — fileURLToPath only (Windows)', () => {
+  const roots = [SRC, fileURLToPath(new URL('../bin', import.meta.url)), fileURLToPath(new URL('.', import.meta.url))]
+  const offenders = []
+  for (const root of roots) {
+    for (const f of readdirSync(root).filter((f) => f.endsWith('.js'))) {
+      const src = readFileSync(join(root, f), 'utf8')
+      // req.url parsing is a URL, not a FILE url — only import.meta.url and
+      // file: URLs are the hazard.
+      for (const m of src.matchAll(/new URL\(([^)]*)\)\.pathname/g)) {
+        if (/import\.meta\.url|'file:/.test(m[1])) offenders.push(`${f}: ${m[0]}`)
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `use fileURLToPath(new URL(…)) instead:\n  ${offenders.join('\n  ')}`)
+})
 
 test('every src module is classified — a new module must pick a side', () => {
   const all = readdirSync(SRC).filter((f) => f.endsWith('.js'))

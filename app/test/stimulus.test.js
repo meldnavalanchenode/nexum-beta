@@ -8,11 +8,12 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseStimulusReport, toStimulusBaseline, analyzeStimulus, diffStimulus } from '../src/stimulus.js'
 import { verdict } from '../src/engine.js'
 import { CHECKS } from '../src/registry.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const KNOWN = new Set(CHECKS.map((c) => c.id))
 const report = (over = {}) => ({
   physyncStimulus: 1,

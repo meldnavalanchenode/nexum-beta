@@ -100,8 +100,20 @@ const bareAction = (a) => a.startsWith('test:') ? a.slice(5) : a.startsWith('cal
 /** Record what actually happened and compute the set-fact deltas. */
 export function debrief({ checked, notes = '', by, now }, dir = '.') {
   if (typeof by !== 'string' || !by.trim()) throw new Error('a debrief needs --by <name>')
-  const e = openExperiment(dir)
-  if (!e) throw new Error('no open experiment — nothing to debrief')
+  // A sealed-but-never-debriefed experiment is still debriefable: saving a
+  // verified state is the NATURAL next step after re-verifying a robot, and
+  // sealing used to make the debrief permanently impossible — destroying the
+  // comparison the experiment existed to produce.
+  const e = openExperiment(dir) ?? listExperiments(dir).filter((x) => x.revealedAt != null && !x.debrief).pop()
+  if (!e) {
+    const pending = listExperiments(dir).filter((x) => x.revealedAt == null && x.closedAt == null)
+    throw new Error(pending.length
+      ? `experiment ${pending[pending.length - 1].id} has a prediction but was never revealed — run \`physync status\` first, then debrief`
+      : 'no experiment awaiting a debrief — start one with `physync predict --checks "…" --by <name>`')
+  }
+  if (e.debrief) {
+    throw new Error(`experiment ${e.id} was already debriefed by ${e.debrief.by} at ${e.debriefedAt}${e.debrief.verdict ? ` (verdict ${e.debrief.verdict})` : ''}. A debrief records what happened — it is never silently rewritten. Start a new experiment for the next change.`)
+  }
   if (e.revealedAt == null) throw new Error(`experiment ${e.id} was never revealed — run status first (the comparison needs Nexum's answer on record)`)
   const actual = parseChecks(checked ?? '').map(norm)
   const predicted = e.prediction.checks.map(norm)
@@ -137,6 +149,9 @@ export function assignVerdict({ verdict, basis, by }, dir = '.') {
   if (typeof by !== 'string' || !by.trim()) throw new Error('a verdict needs --by <name>')
   const e = openExperiment(dir) ?? listExperiments(dir).filter((x) => x.debrief && !x.debrief.verdict).pop()
   if (!e || !e.debrief) throw new Error('no debriefed experiment awaiting a verdict')
+  if (e.debrief.verdict) {
+    throw new Error(`experiment ${e.id} already carries the verdict ${e.debrief.verdict} (${e.debrief.verdictBasis}). A pre-registered judgment is not revised in place — if it was wrong, say so in the next experiment's basis rather than erasing the original.`)
+  }
   e.debrief.verdict = verdict
   e.debrief.verdictBasis = `${basis.trim()} — assigned by ${by.trim()}`
   return save(e, dir)

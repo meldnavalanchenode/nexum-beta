@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   buildVerifiedState, validateState, saveState, listStates, latestState, nextVersion,
   migrateLegacy, detectChanges, deploymentStatus, statusExitCode, stableStringify,
@@ -19,7 +20,7 @@ import {
 import { buildApproval } from '../src/approval.js'
 import { ENGINE_VERSION } from '../src/registry.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const CONFIG_XML = '<Robot type="FirstInspires-FTC"><Motor name="m" port="0" /></Robot>'
 const ROBOT = {
   hubs: [{ address: 173, firmware: 'HW: 20, Maj: 1, Min: 8, Eng: 2' }],

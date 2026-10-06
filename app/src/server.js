@@ -7,6 +7,7 @@
 import { createServer } from 'node:http'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseConfigXml } from './configXml.js'
 import { scanSources } from './codeScan.js'
 import { reconcile, verdict } from './engine.js'
@@ -14,7 +15,7 @@ import { renderMarkdown } from './report.js'
 import { ENGINE_VERSION, checkMeta } from './registry.js'
 import { buildApproval, validateApproval, compareApproval } from './approval.js'
 import { parseRobotReport, analyzeSensors } from './sensors.js'
-import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode } from './state.js'
+import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode, rederivedFrom } from './state.js'
 import { loadGraph, saveGraph, validateEdge, effectiveEdges, matchNode } from './graph.js'
 import { plan, APPLICABILITY } from './planner.js'
 import { markRevealed, closeExperiment } from './experiment.js'
@@ -24,7 +25,11 @@ import { loadFingerprintDefs } from './fingerprints.js'
 
 const PORT = Number(process.env.PHYSYNC_PORT ?? 4620)
 const UI = new URL('../ui/index.html', import.meta.url)
-const SAMPLES = new URL('../samples/', import.meta.url).pathname
+// fileURLToPath, never url.pathname: on Windows .pathname yields "/C:/…",
+// whose leading slash makes every readFileSync built from it fail. School
+// laptops are Windows, and no beta team should meet that as their first
+// impression.
+const SAMPLES = fileURLToPath(new URL('../samples/', import.meta.url))
 const BODY_CAP = 5_000_000 // config + a season of OpModes fits well under 5MB
 
 const json = (res, code, obj) => {
@@ -316,8 +321,9 @@ const server = createServer(async (req, res) => {
       if (changes.length) {
         const satisfied = new Set()
         if (failFindings === 0) satisfied.add('check')
-        if (c.candidate.hubs != null) satisfied.add('preflight')
-        revalidation = plan({ state: base, changes, graph: loadGraph('.'), satisfiedActions: satisfied })
+        // per-row re-derivation, same rule as the CLI (see rederivedFrom)
+        const rederivedTargets = rederivedFrom(base, c.candidate, changes)
+        revalidation = plan({ state: base, changes, graph: loadGraph('.'), satisfiedActions: satisfied, rederivedTargets })
         const reportedAt = new Map(changes.filter((ch) => ch.source === 'human' && ch.at).map((ch) => [ch.id, ch.at]))
         const cutoffFor = (rq) => (rq.becauseIds ?? []).reduce((m, id) => { const t = reportedAt.get(id); return t != null && t > m ? t : m }, base.createdAt)
         const stillRequired = []
@@ -345,9 +351,9 @@ const server = createServer(async (req, res) => {
       resultFailures += standingFailures.length
       const status = deploymentStatus({ failFindings: failFindings + resultFailures, changes, gaps })
       // same shadow-mode reveal semantics as the CLI — one project dir, one truth
-      const shadow = markRevealed({
+      const shadow = changes.length === 0 ? null : markRevealed({
         changes,
-        planActions: revalidation ? revalidation.required.map((rq) => rq.action) : [],
+        planActions: revalidation ? [...revalidation.required, ...revalidation.satisfiedThisRun].map((rq) => rq.action) : [],
         applicabilityCounts: revalidation ? revalidation.applicability.reduce((m, a) => ({ ...m, [a.applicability]: (m[a.applicability] ?? 0) + 1 }), {}) : {},
       }, '.')
       return json(res, 200, {

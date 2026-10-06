@@ -12,12 +12,13 @@ import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseConfigXml } from '../src/configXml.js'
 import { scanJavaSource } from '../src/codeScan.js'
 import { buildExplainPrompt } from '../src/assist.js'
 import { sanitizeLine } from '../src/text.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const ESC = String.fromCharCode(27)
 const NL = String.fromCharCode(10)
 
@@ -116,7 +117,7 @@ test('sanitizeLine: newlines/tabs become spaces; every other C0/C1 becomes visib
 // ── CSRF on the local server ────────────────────────────────────────────────
 const PORT = 4800 + (process.pid % 90)
 const BASE = `http://127.0.0.1:${PORT}`
-const SERVER = new URL('../src/server.js', import.meta.url).pathname
+const SERVER = fileURLToPath(new URL('../src/server.js', import.meta.url))
 const DIR = mkdtempSync(join(tmpdir(), 'physync-csrf-'))
 let proc
 test.before(async () => {

@@ -24,11 +24,12 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseConfigXml, toSnapshot } from '../src/configXml.js'
 import { scanSources, scanCodeDir } from '../src/codeScan.js'
 import { reconcile, diffSnapshot, verdict } from '../src/engine.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const mulberry32 = (seed) => () => {
   seed |= 0; seed = (seed + 0x6d2b79f5) | 0
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)

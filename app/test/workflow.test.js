@@ -10,8 +10,9 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const FIX = join(APP, 'fixtures')
 const fixture = (name) => JSON.parse(readFileSync(join(FIX, name), 'utf8'))
 

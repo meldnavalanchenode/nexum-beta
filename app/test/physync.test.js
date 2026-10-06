@@ -5,13 +5,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { parseConfigXml, toSnapshot, portSpace } from '../src/configXml.js'
 import { scanJavaSource, scanCodeDir } from '../src/codeScan.js'
 import { reconcile, diffSnapshot, verdict, editDistance } from '../src/engine.js'
 import { renderMarkdown } from '../src/report.js'
 
 const SAMPLE_XML = new URL('../samples/config.xml', import.meta.url)
-const SAMPLE_CODE = new URL('../samples/TeamCode', import.meta.url).pathname
+const SAMPLE_CODE = fileURLToPath(new URL('../samples/TeamCode', import.meta.url))
 const sampleConfig = () => parseConfigXml(readFileSync(SAMPLE_XML, 'utf8'))
 
 test('configXml: parses portals, hubs, devices with ports/buses/lines', () => {
@@ -127,7 +128,7 @@ test('cli: end-to-end on samples — FAILs (exit 2) and names both planted bugs'
   let out = ''
   try {
     execFileSync(process.execPath, ['bin/physync.js', 'check', '--config', 'samples/config.xml', '--code', 'samples/TeamCode'],
-      { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8' })
+      { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' })
     assert.fail('expected exit 2')
   } catch (e) {
     assert.equal(e.status, 2)

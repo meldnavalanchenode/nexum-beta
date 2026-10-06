@@ -11,10 +11,11 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, existsSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const PORT = 4900 + (process.pid % 90)
 const BASE = `http://127.0.0.1:${PORT}`
-const SERVER = new URL('../src/server.js', import.meta.url).pathname
+const SERVER = fileURLToPath(new URL('../src/server.js', import.meta.url))
 const DIR = mkdtempSync(join(tmpdir(), 'physync-srvstate-'))
 
 const CONFIG = '<Robot type="FirstInspires-FTC"><LynxUsbDevice name="P" serialNumber="X" parentModuleAddress="173"><LynxModule name="Control Hub" port="173"><goBILDA5202SeriesMotor name="left_drive" port="0" /><Servo name="claw" port="1" /></LynxModule></LynxUsbDevice></Robot>'

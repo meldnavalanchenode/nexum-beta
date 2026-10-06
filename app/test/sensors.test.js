@@ -9,11 +9,12 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseRobotReport, toSensorBaseline, analyzeSensors, diffSensors } from '../src/sensors.js'
 import { verdict } from '../src/engine.js'
 import { CHECKS } from '../src/registry.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const KNOWN = new Set(CHECKS.map((c) => c.id))
 const sensor = (over = {}) => ({ name: 's', type: 'RevColorSensorV3', class: 'i2c', read: 'ok', value: 'r=12 g=30 b=8 a=48', livenessDeterminable: true, ...over })
 const robot = (sensors) => JSON.stringify({

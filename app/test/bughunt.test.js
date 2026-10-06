@@ -14,10 +14,11 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { stableStringify } from '../src/state.js'
 import { appendResult, latestResults, loadResults } from '../src/results.js'
 
-const APP = new URL('..', import.meta.url).pathname
+const APP = fileURLToPath(new URL('..', import.meta.url))
 const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.json'), 'utf8'))
 
 const run = (dir, a) => {

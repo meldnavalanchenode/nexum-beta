@@ -138,27 +138,36 @@ export function expandTarget(to, capture, universe) {
  *  proposed edge can lower confidence in a label; it can never cause work. */
 export function traverse(graph, changedComponents, universe, { includeProposed = false } = {}) {
   const edges = includeProposed ? [...graph.builtin, ...graph.custom] : effectiveEdges(graph)
-  const reached = new Map() // nodeId → { via: Set<edgeId>, because: Set<changeId> }
+  const reached = new Map() // nodeId → { via, because, fromNodes, proposedOnPath }
   const queue = []
   for (const { componentId, changeId } of changedComponents) {
-    queue.push({ nodeId: componentId, changeId, path: [] })
+    queue.push({ nodeId: componentId, changeId, path: [], crossedProposed: [] })
   }
   const seen = new Set()
   while (queue.length) {
-    const { nodeId, changeId, path } = queue.shift()
-    const key = `${changeId}|${nodeId}`
+    const { nodeId, changeId, path, crossedProposed } = queue.shift()
+    // The key carries whether this walk is still "clean" (all-approved): a
+    // node reachable both cleanly and through a proposed hop must explore
+    // BOTH, or the first arrival decides the node's honesty for everyone.
+    const key = `${changeId}|${nodeId}|${crossedProposed.length ? 'p' : 'a'}`
     if (seen.has(key)) continue
     seen.add(key)
     for (const edge of edges) {
       const capture = matchNode(edge.from, nodeId)
       if (capture === null) continue
+      // A PROPOSED edge anywhere UPSTREAM taints the whole path: everything
+      // past it is only as certain as the unapproved hop. Recording only the
+      // last hop let a proposed→approved chain read as fully approved, which
+      // turned honest ignorance into false assurance.
+      const nextCrossed = edge.status === 'proposed' ? [...crossedProposed, edge.id] : crossedProposed
       for (const target of expandTarget(edge.to, capture, universe)) {
-        if (!reached.has(target)) reached.set(target, { via: new Set(), because: new Set(), fromNodes: new Set() })
+        if (!reached.has(target)) reached.set(target, { via: new Set(), because: new Set(), fromNodes: new Set(), proposedOnPath: new Set() })
         const r = reached.get(target)
         r.via.add(edge.id)
         r.because.add(changeId)
         r.fromNodes.add(nodeId) // the node this demand arrived FROM (reason-code derivation reads it)
-        queue.push({ nodeId: target, changeId, path: [...path, edge.id] })
+        for (const p of nextCrossed) r.proposedOnPath.add(p)
+        queue.push({ nodeId: target, changeId, path: [...path, edge.id], crossedProposed: nextCrossed })
       }
     }
   }

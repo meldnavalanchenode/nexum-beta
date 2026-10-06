@@ -46,6 +46,9 @@ export function reasonCodeFor(evidenceId, trace, changeById) {
   if (causes.some((c) => c.kind === 'firmware-changed')) return 'FIRMWARE_CHANGED'
   if (causes.some((c) => c.kind === 'physical-change-reported')) return 'PHYSICAL_CHANGE_REPORTED'
   if (causes.some((c) => c.kind === 'software-changed')) return 'SOFTWARE_CHANGED'
+  // The identity relation: the change names this very row (no edge needed —
+  // `via` is empty and the walk "arrived" from the node itself).
+  if (trace.via.size === 0 && [...(trace.fromNodes ?? [])].includes(evidenceId)) return 'DIRECT_COMPONENT_CHANGE'
   // Demand that arrived FROM a calibration node: this evidence was validated
   // through a calibration that is itself in doubt — the stale middleman is
   // the useful fact. Nodes deeper down a chain get DEPENDENCY_CHANGED, which
@@ -175,7 +178,7 @@ export function actionFor(nodeId) {
     // has to walk the robot and confirm the list still matches it.
     return { action: 'declare', label: 'confirm the declared inventory against the physical robot, then save a new state with --declare' }
   }
-  if (nodeId === 'hub-census' || nodeId.startsWith('sensor-liveness:')) {
+  if (nodeId === 'hub-census' || nodeId.startsWith('sensor-liveness:') || nodeId.startsWith('fingerprint:')) {
     return { action: 'preflight', label: 'PHYSYNC Preflight OpMode → fresh physync-robot.json' }
   }
   if (nodeId.startsWith('motor-response:') || nodeId.startsWith('servo-response:')) {
@@ -199,7 +202,7 @@ export function actionFor(nodeId) {
  *                     (e.g. status ran check → 'check'; --robot supplied →
  *                     'preflight'). The planner marks, never silently drops.
  */
-export function plan({ state, changes, graph, satisfiedActions = new Set() }) {
+export function plan({ state, changes, graph, satisfiedActions = new Set(), rederivedTargets = new Set() }) {
   const evidenceIds = new Set(state.evidence.map((e) => e.id))
   // The id universe for wildcard expansion: real evidence plus every node
   // mentioned by an effective edge (so custom test:/calibration: chains
@@ -213,6 +216,25 @@ export function plan({ state, changes, graph, satisfiedActions = new Set() }) {
   const changedComponents = changes.flatMap((c) => componentsOf(c).map((componentId) => ({ componentId, changeId: c.id })))
   const unmapped = changes.filter((c) => componentsOf(c).length === 0)
   const reached = traverse(graph, changedComponents, universe)
+
+  // THE IDENTITY RELATION. traverse() only ever records the TARGETS of edges,
+  // so when a change's component id IS an evidence id — a drifted
+  // `fingerprint:imu-gravity`, a person reporting `test:localization` by name
+  // — nothing connected the change to the very row it refutes, and that row
+  // fell through to APPLICABLE ("no known dependency connects it to any
+  // change"). The measurement the robot provably contradicted was the one
+  // asserted to be fine. A change against a row IS that row's dependency; no
+  // edge is needed to say so, so it is seeded here with an empty `via`.
+  const seedIdentity = (map) => {
+    for (const { componentId, changeId } of changedComponents) {
+      if (!evidenceIds.has(componentId)) continue
+      if (!map.has(componentId)) map.set(componentId, { via: new Set(), because: new Set(), fromNodes: new Set(), proposedOnPath: new Set() })
+      const r = map.get(componentId)
+      r.because.add(changeId)
+      r.fromNodes.add(componentId) // itself: the reason derivation reads this as a direct hit
+    }
+  }
+  seedIdentity(reached)
   // A change can map to a component and still reach no evidence at all — the
   // node has no approved edge out of it, or every edge it follows lands on a
   // built-in family this device never belonged to. That change invalidated
@@ -248,8 +270,9 @@ export function plan({ state, changes, graph, satisfiedActions = new Set() }) {
       invalidated.push({ evidenceId: nodeId, via: [...trace.via], because, becauseHuman })
     }
     const { action, label } = actionFor(nodeId)
-    if (!requirements.has(action)) requirements.set(action, { action, label, targets: [], because: new Set(), becauseHuman: new Set(), becauseIds: new Set(), via: new Set(), reasonCodes: new Set(), satisfied: satisfiedActions.has(action), rank: Infinity })
+    if (!requirements.has(action)) requirements.set(action, { action, label, targets: [], targetIds: new Set(), because: new Set(), becauseHuman: new Set(), becauseIds: new Set(), via: new Set(), reasonCodes: new Set(), satisfied: satisfiedActions.has(action), rank: Infinity })
     const req = requirements.get(action)
+    req.targetIds.add(nodeId)
     req.reasonCodes.add(reasonCodeFor(nodeId, trace, changeById))
     req.targets.push(nodeId + (hasEvidence ? '' : ' (no recorded result — UNKNOWN)'))
     // BFS insertion order in `reached` approximates dependency depth from the
@@ -274,7 +297,18 @@ export function plan({ state, changes, graph, satisfiedActions = new Set() }) {
   // of asking users to trust an unexplained conclusion. rank orders the plan
   // upstream-first (run the calibration before the test that consumes it).
   const required = [...requirements.values()]
-    .map((r) => ({ ...r, because: [...r.because], becauseHuman: [...r.becauseHuman], becauseIds: [...r.becauseIds], via: [...r.via], reasonCodes: [...r.reasonCodes] }))
+    // A per-target action is only satisfied when EVERY target it covers was
+    // actually re-derived. Supplying a fresh robot report used to satisfy
+    // `preflight` wholesale — including for a sensor the report omitted or
+    // showed erroring, which re-derives nothing and silently dropped the
+    // recheck that sensor was owed.
+    .map((r) => {
+      if (r.satisfied) return r
+      const ids = [...r.targetIds]
+      const perTarget = ids.length > 0 && ids.every((id) => /^(hub-census|sensor-liveness:|fingerprint:|motor-response:|servo-response:)/.test(id))
+      return perTarget && ids.every((id) => rederivedTargets.has(id)) ? { ...r, satisfied: true } : r
+    })
+    .map((r) => ({ ...r, targetIds: [...r.targetIds], because: [...r.because], becauseHuman: [...r.becauseHuman], becauseIds: [...r.becauseIds], via: [...r.via], reasonCodes: [...r.reasonCodes] }))
     .sort((a, b) => a.rank - b.rank)
     .map((r, i) => ({ ...r, order: i + 1 }))
 
@@ -288,6 +322,7 @@ export function plan({ state, changes, graph, satisfiedActions = new Set() }) {
   //               claiming either APPLICABLE or REVALIDATE would be invented
   //   APPLICABLE  no known dependency of any status connects it to a change
   const reachedAll = changes.length ? traverse(graph, changedComponents, universe, { includeProposed: true }) : new Map()
+  seedIdentity(reachedAll)
   // Folded calibration results live under `test:X` while graph demands name
   // `calibration:X` — the same physical referent must classify together, or
   // the table says "your calibration evidence is fine" beside a plan that
@@ -298,7 +333,14 @@ export function plan({ state, changes, graph, satisfiedActions = new Set() }) {
     const any = reachedFor(reachedAll, e.id)
     if (active) {
       const { action } = actionFor(e.id)
-      const rederived = satisfiedActions.has(action)
+      // RE-DERIVED is a claim about THIS row, so it is decided per-target
+      // wherever the caller can speak per-target (the preflight family:
+      // a report that omits a sensor, or shows it erroring, re-derives
+      // nothing about it). Action-level satisfaction remains correct only
+      // for whole-run artifacts — `check` re-derives the reconciliation
+      // entire, `declare` is a person walking the robot.
+      const perTarget = /^(hub-census|sensor-liveness:|fingerprint:|motor-response:|servo-response:)/.test(e.id)
+      const rederived = perTarget ? rederivedTargets.has(e.id) : satisfiedActions.has(action)
       return {
         evidenceId: e.id, result: e.result,
         applicability: rederived ? APPLICABILITY.REDERIVED : APPLICABILITY.REVALIDATE,
@@ -310,7 +352,12 @@ export function plan({ state, changes, graph, satisfiedActions = new Set() }) {
       }
     }
     if (any) {
-      const proposedVia = [...any.via].filter((id) => edgeById.get(id)?.status === 'proposed')
+      // proposedOnPath, not via: `via` holds only the LAST hop, so a
+      // proposed→approved chain used to read as fully approved and the row
+      // dropped to APPLICABLE — a positive assurance manufactured out of an
+      // unapproved guess. A proposed edge ANYWHERE upstream means the whole
+      // conclusion is unapproved.
+      const proposedVia = [...new Set([...(any.proposedOnPath ?? []), ...[...any.via].filter((id) => edgeById.get(id)?.status === 'proposed')])]
       if (proposedVia.length) {
         return {
           evidenceId: e.id, result: e.result,
