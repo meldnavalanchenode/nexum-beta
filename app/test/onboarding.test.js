@@ -69,12 +69,14 @@ test('THE DOCUMENTED PATH produces real rechecks — the P0 this fixes', () => {
   // before approval: an honest refusal to guess, not a silent nothing
   run(dir, ['state', '--config', 'yourconfig.xml', '--code', 'code'])
   run(dir, ['change', '--component', 'camera-position', '--note', 're-aimed', '--by', 'Faraday'])
-  const unapproved = run(dir, ['status'])
+  const unapproved = run(dir, ['status', '--reveal'])
   assert.match(unapproved.out, /NO DEPENDENCY MAPPING|UNKNOWN/, 'unapproved rules produce honest ignorance')
 
-  // after the human decision the README asks for: the product's actual value
+  // after the human decision the README asks for: the product's actual value.
+  // (--reveal because THIS test is about plan content, not the experiment
+  // ordering — the gate that would otherwise withhold it has its own test.)
   for (const id of ['camera-pose:01', 'camera-pose:02']) run(dir, ['graph', '--approve', id, '--by', 'Faraday'])
-  const j = JSON.parse(run(dir, ['status', '--json']).out.replace(/^[^{]*/, ''))
+  const j = JSON.parse(run(dir, ['status', '--json', '--reveal']).out.replace(/^[^{]*/, ''))
   const actions = j.revalidation.required.map((r) => r.action)
   assert.ok(actions.includes('calibration:camera-pose'), `expected the calibration recheck, got ${actions.join(', ')}`)
   assert.ok(actions.includes('test:localization'), 'and the test that depends on it')
@@ -126,4 +128,42 @@ test('user-facing banners say NEXUM — the name the team was given', () => {
   const out = run(dir, ['check', '--config', 'yourconfig.xml', '--code', 'code']).out
   assert.match(out, /██ NEXUM PREFLIGHT/)
   assert.ok(!/██ PHYSYNC/.test(out), 'no second product name in front of a beta tester')
+})
+
+// ── remote self-service: the experiment protects itself ────────────────────
+// Reading Nexum's answer before writing your own prediction destroys that
+// change's datapoint permanently — the one mistake in this tool that cannot
+// be undone. A supervised session prevents it with a human; remote beta has
+// to prevent it in the product.
+test('status withholds its ANSWER until a prediction is on record — but still shows what changed', () => {
+  const dir = freshRobot()
+  run(dir, ['init', '--config', 'yourconfig.xml', '--code', 'code', '--by', 'F'])
+  for (const id of ['camera-pose:01', 'camera-pose:02']) run(dir, ['graph', '--approve', id, '--by', 'F'])
+  run(dir, ['result', '--test', 'localization', '--pass', '--by', 'F'])
+  run(dir, ['state', '--config', 'yourconfig.xml', '--code', 'code'])
+  run(dir, ['change', '--component', 'camera-position', '--note', 're-aimed', '--by', 'F'])
+
+  const gated = run(dir, ['status'])
+  assert.match(gated.out, /PREDICTION NOT YET RECORDED/)
+  assert.match(gated.out, /camera-position/, 'what CHANGED is still shown — it contaminates nothing')
+  assert.ok(!/REVALIDATE|REQUIRED REVALIDATION/.test(gated.out), 'but the answer is withheld')
+
+  const j = JSON.parse(run(dir, ['status', '--json']).out.replace(/^[^{]*/, ''))
+  assert.equal(j.predictionRequired, true, 'machine consumers get the gate as a fact')
+  assert.ok(!j.revalidation, 'and no plan leaks through --json either')
+
+  // the escape hatch, for anyone not running the experiment
+  assert.match(run(dir, ['status', '--reveal']).out, /REQUIRED REVALIDATION/)
+
+  // and once armed, the full answer
+  run(dir, ['predict', '--checks', 'localization', '--by', 'F'])
+  const revealed = run(dir, ['status'])
+  assert.match(revealed.out, /REVALIDATE {2}test:localization/)
+  assert.match(revealed.out, /prediction locked/)
+})
+
+test('an unsupported Node says so in words a student can act on', () => {
+  const src = readFileSync(join(APP, 'bin/physync.js'), 'utf8')
+  assert.match(src, /Nexum needs Node 20 or newer/, 'the version gate exists')
+  assert.match(src, /nodejs\.org/, 'and points at the fix')
 })

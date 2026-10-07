@@ -69,6 +69,20 @@ const usage = `usage:
   physync pull [--host 192.168.43.1:5555] [--out pulled/]`
 function die(msg) { console.error(msg); process.exit(1) }
 
+// An unsupported Node is the likeliest way a remote first-run dies, and the
+// native error ("Unexpected token", a syntax error deep in a module) names
+// nothing a student can act on. Say the actual problem, once, in their words.
+{
+  const major = Number(process.versions.node.split('.')[0])
+  if (Number.isFinite(major) && major < 20) {
+    console.error(`\n  Nexum needs Node 20 or newer — this is Node ${process.versions.node}.`)
+    console.error('  Install the LTS build from https://nodejs.org (it replaces this one safely),')
+    console.error('  reopen your terminal, and check with:  node --version')
+    console.error('  Nothing else about your setup needs to change.\n')
+    process.exit(1)
+  }
+}
+
 // Carefully-worded integrity messages used to reach the user as a raw Node
 // stack trace: the ledger loader throws, nothing catches it, and ONE damaged
 // file under .physync took down every command — including the ones that could
@@ -108,7 +122,7 @@ const KNOWN_FLAGS = {
   gate: ['config', 'file', 'approval', 'json'],
   state: ['config', 'code', 'robot', 'stimulus', 'declare', 'json'],
   states: ['json'],
-  status: ['config', 'code', 'robot', 'declare', 'json'],
+  status: ['config', 'code', 'robot', 'declare', 'json', 'reveal'],
   rules: ['pack', 'by', 'json'],
   change: ['component', 'note', 'by', 'list', 'json'],
   graph: ['propose', 'from', 'to', 'note', 'approve', 'by', 'json'],
@@ -262,6 +276,9 @@ if (cmd === 'init') {
   const packName = opt('pack') ?? 'camera-pose'
 
   mkdirSync('.physync', { recursive: true })
+  // Opt-in marker: this project is running the shadow-mode experiment, so
+  // status will hold its answer until a prediction is on record.
+  writeFileSync('.physync/beta.json', JSON.stringify({ experiment: 'shadow-mode', by, at: new Date().toISOString() }, null, 2))
   const notes = []
 
   // 1 · tests.json — a starting vocabulary of checks a team actually runs.
@@ -1082,6 +1099,46 @@ if (cmd === 'status') {
   // And a run with NO changes has no answer to reveal; stamping it would
   // freeze the snapshot as "Nexum recommended nothing" before the real
   // comparison ever happened (first reveal wins, permanently).
+  // THE ORDERING GUARD. Reading Nexum's answer contaminates a prediction that
+  // was never written down — and unlike every other mistake in this tool, that
+  // one cannot be undone: the team's uninfluenced judgment is gone for this
+  // change, permanently. In a supervised session a human prevents it; remotely
+  // the product has to. So when there are changes and no prediction is armed,
+  // WHAT CHANGED is still shown (they can see that on their own robot anyway —
+  // it contaminates nothing), but the applicability table and the plan are
+  // withheld behind one command. --reveal is the deliberate escape hatch for
+  // anyone who is not running the experiment.
+  // …and ONLY for a project that opted into the experiment by running `init`.
+  // Gating everyone would hold the core feature hostage to a study they never
+  // signed up for — the tool's job is to answer the question, and the beta is
+  // our interest, not theirs.
+  const betaMode = existsSync('.physync/beta.json')
+  const armed = (() => { try { return openExperiment('.') } catch { return null } })()
+  const gateOrdering = betaMode && !armed && !args.includes('--reveal')
+  if (changes.length && gateOrdering && args.includes('--json')) {
+    // Machine consumers get the same gate as a fact, not as prose.
+    console.log(JSON.stringify({
+      physync: 1, predictionRequired: true, against: `V${base.version}`, changes,
+      hint: 'record the human prediction first: physync predict --checks "a, b" --by <name>; or pass --reveal',
+      exit: statusExitCode(status),
+    }, null, 2))
+    process.exit(statusExitCode(status))
+  }
+  if (changes.length && gateOrdering) {
+    console.log(`\n  ${process.stdout.isTTY ? '\x1b[33m' : ''}██ ${changes.length} CHANGE(S) DETECTED — PREDICTION NOT YET RECORDED ██${process.stdout.isTTY ? '\x1b[0m' : ''}   (vs V${base.version})\n`)
+    for (const c of changes) {
+      console.log(c.source === 'human'
+        ? `    • ${c.component} — reported by ${c.by}${c.note ? `: "${c.note}"` : ''}`
+        : `    • ${c.component}: ${c.previous ?? '(absent)'} → ${c.current ?? '(absent)'}`)
+    }
+    console.log('\n  Before Nexum tells you what IT would re-check, write down what YOU would:')
+    console.log('    node app/bin/physync.js predict --checks "a, b" --by <yourName>')
+    console.log('\n  Then run status again and you\'ll get the full answer. This takes 20 seconds')
+    console.log('  and it is the entire point of the beta — once you\'ve read Nexum\'s list,')
+    console.log('  nobody can ever know what you would have checked on your own.')
+    console.log(`\n  Not running the experiment? ${'node app/bin/physync.js status --reveal'} shows everything now.\n`)
+    process.exit(statusExitCode(status))
+  }
   const shadow = changes.length === 0 ? null : markRevealed({
     changes,
     planActions: revalidation ? [...revalidation.required, ...revalidation.satisfiedThisRun].map((r) => r.action) : [],
