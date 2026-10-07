@@ -119,7 +119,7 @@ test('engine: editDistance handles transpositions (wrsit→wrist = 1)', () => {
 test('report: markdown carries verdict, check versions, and evidence', () => {
   const findings = reconcile(sampleConfig(), { refs: [{ name: 'wrsit', file: 'T.java', line: 9 }], filesScanned: 1 })
   const md = renderMarkdown(findings, { deviceCount: 11, refCount: 1, filesScanned: 1 })
-  assert.match(md, /# PHYSYNC preflight — FAIL/)
+  assert.match(md, /# NEXUM preflight — FAIL/)
   assert.match(md, /code-name-missing v0\.1\.0/)
   assert.match(md, /T\.java:9/)
 })

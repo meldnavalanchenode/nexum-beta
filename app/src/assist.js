@@ -15,7 +15,11 @@ const SYSTEM = `You are PHYSYNC's explain assistant, helping FTC student robotic
  *  can never fabricate a standalone engine-formatted line), length-capped,
  *  and fenced in « » quotes the frame text never uses. */
 const MAX_FINDINGS = 25
-const fence = (s, n = 400) => `«${clip(sanitizeLine(s), n)}»`
+// Evidence strings carry absolute file paths (…/Users/<name>/…), which name
+// the operator's machine and account to a third-party API for no explanatory
+// benefit — the model only needs the file, not the route to it.
+const stripPaths = (s) => String(s).replace(/(?:[A-Za-z]:\\|\/)[^\s:,)]*[/\\]([^\s/\\:,)]+)/g, '$1')
+const fence = (s, n = 400) => `«${clip(sanitizeLine(stripPaths(s)), n)}»`
 export function buildExplainPrompt({ verdict, findings, context }) {
   const shown = findings.slice(0, MAX_FINDINGS)
   const lines = [

@@ -145,7 +145,7 @@ export function debrief({ checked, notes = '', by, now }, dir = '.') {
 export function assignVerdict({ verdict, basis, by }, dir = '.') {
   const LEGAL = ['HELPED', 'NO VALUE', 'EXTRA WORK', 'MISSED', 'AMBIGUOUS']
   if (!LEGAL.includes(verdict)) throw new Error(`verdict must be one of: ${LEGAL.join(' | ')}`)
-  if (typeof basis !== 'string' || !basis.trim()) throw new Error('a verdict needs --basis <one sentence citing the SHADOW-PROTOCOL rule>')
+  if (typeof basis !== 'string' || !basis.trim()) throw new Error('a verdict needs --basis "<one sentence saying why>" — the judgment is yours, so the reasoning is recorded with it')
   if (typeof by !== 'string' || !by.trim()) throw new Error('a verdict needs --by <name>')
   const e = openExperiment(dir) ?? listExperiments(dir).filter((x) => x.debrief && !x.debrief.verdict).pop()
   if (!e || !e.debrief) throw new Error('no debriefed experiment awaiting a verdict')

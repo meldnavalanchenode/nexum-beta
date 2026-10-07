@@ -1,0 +1,22 @@
+# Nexum — things that must not end up in a commit.
+#
+# The README has you run Nexum from the clone root with your own robot's
+# config and TeamCode, so those files (and Nexum's own record) land inside
+# this git working tree. None of it belongs in a repository.
+
+# Nexum's record of YOUR robot: verified states, results, experiments —
+# and .physync/gate.key, a secret that must never be committed anywhere.
+.physync/
+.physync-broken/
+
+# Your robot's own files, if you copied them in here
+*.xml
+!app/samples/*.xml
+TeamCode/
+YourTeamCode/
+physync-robot.json
+physync-stimulus.json
+physync-report.md
+
+node_modules/
+.DS_Store

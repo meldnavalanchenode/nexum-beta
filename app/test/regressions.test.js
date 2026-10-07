@@ -207,7 +207,7 @@ test('hard-test: --json output is deterministic (no timestamp) and --report stil
   assert.equal(parsed.physync, 1)
   assert.equal(parsed.verdict, 'PASS')
   assert.ok(!('timestamp' in parsed.context))
-  assert.ok(readFileSync(join(dir, 'out.md'), 'utf8').includes('PHYSYNC preflight'), '--report must write alongside --json')
+  assert.ok(readFileSync(join(dir, 'out.md'), 'utf8').includes('NEXUM preflight'), '--report must write alongside --json')
 })
 
 test('hard-test: Blockly variable named like an identifier produces NO stale-identifier WARN', async () => {

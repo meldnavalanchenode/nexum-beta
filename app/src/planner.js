@@ -88,6 +88,13 @@ export function componentsOf(change) {
     case 'sensor-type-changed':
     case 'sensor-response-lost':
       return [`sensor:${change.component.match(/"([^"]+)"/)?.[1] ?? change.component}`]
+    // The config and the robot disagree about what a device IS. That touches
+    // both the declared side (device:) and the observed side (sensor:), so
+    // everything either layer established about it is in question.
+    case 'declared-observed-mismatch': {
+      const n = change.component.match(/"([^"]+)"/)?.[1] ?? change.component
+      return [`device:${n}`, `sensor:${n}`]
+    }
     // A person reported a physical change no file records (a re-aimed camera
     // mount, a re-tensioned belt). They named the graph node themselves, so it
     // is used verbatim — and like every other change it can only reach evidence
@@ -135,6 +142,7 @@ export function describeChange(c) {
     case 'hub-missing': return `${c.component} stopped answering the census (was firmware ${c.previous})`
     case 'hub-added': return `${c.component} appeared on the census (firmware ${c.current})`
     case 'firmware-changed': return `${c.component} firmware changed: ${delta}`
+    case 'declared-observed-mismatch': return `${c.component}: the configuration and the robot disagree — ${c.previous}, but ${c.current}`
     case 'sensor-missing': return `${c.component} vanished from the robot report (was ${c.previous})`
     case 'sensor-added': return `${c.component} appeared on the robot report (${c.current})`
     case 'sensor-type-changed': return `${c.component} changed type: ${delta}`
@@ -178,11 +186,16 @@ export function actionFor(nodeId) {
     // has to walk the robot and confirm the list still matches it.
     return { action: 'declare', label: 'confirm the declared inventory against the physical robot, then save a new state with --declare' }
   }
+  // These two actions need an on-robot OpMode that is NOT part of the beta
+  // distribution (it has never been validated on real hardware, and Nexum's
+  // promise is that nothing of ours runs on your robot). The label therefore
+  // names the PHYSICAL check a human can do by hand — chasing a file that
+  // isn't in the repo would be a dead end.
   if (nodeId === 'hub-census' || nodeId.startsWith('sensor-liveness:') || nodeId.startsWith('fingerprint:')) {
-    return { action: 'preflight', label: 'PHYSYNC Preflight OpMode → fresh physync-robot.json' }
+    return { action: 'preflight', label: 'confirm by hand that these devices are present and answering (or supply a fresh physync-robot.json)' }
   }
   if (nodeId.startsWith('motor-response:') || nodeId.startsWith('servo-response:')) {
-    return { action: 'stimulus', label: 'PHYSYNC Stimulus pass (bench, wheels off the ground)' }
+    return { action: 'stimulus', label: 'confirm by hand that these actuators still move as expected, wheels off the ground (or supply a fresh stimulus report)' }
   }
   if (nodeId.startsWith('calibration:')) {
     return { action: `calibration:${nodeId.slice('calibration:'.length)}`, label: `redo calibration "${nodeId.slice('calibration:'.length)}"` }

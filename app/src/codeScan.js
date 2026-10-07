@@ -19,7 +19,10 @@
 
 import { readFileSync, readdirSync, statSync, realpathSync } from 'node:fs'
 import { join, basename } from 'node:path'
+import { createHash } from 'node:crypto'
 import { sanitizeLine } from './text.js'
+
+const sha256 = (s) => createHash('sha256').update(String(s), 'utf8').digest('hex')
 
 // Class-typed lookups, any receiver: x.get(Type.class, …) / x.tryGet(…) /
 // Kotlin x.get(Type::class.java, …). Name argument: literal or identifier.
@@ -306,6 +309,16 @@ export function scanBlkSource(source, file, configNames, spaceByName = new Map()
 export function scanSources(files, configNames = new Set(), spaceByName = new Map()) {
   const javaish = files.filter((f) => /\.(java|kt)$/.test(f.name))
   const blks = files.filter((f) => f.name.endsWith('.blk'))
+  // A CONTENT fingerprint of everything actually scanned. git is not enough:
+  // most FTC teams edit without committing (and many TeamCode folders are not
+  // repos at all), so a code-only change — the commonest real change there is
+  // — went completely undetected and status answered "0 change(s)".
+  const codeDigest = sha256(
+    [...javaish, ...blks]
+      .map((f) => `${f.name} ${sha256(f.content)}`)
+      .sort()
+      .join(''),
+  )
 
   // Constant resolution, order-independent (round-3 P0): a file's own
   // constants always win; a cross-file constant is usable only when every
@@ -363,7 +376,7 @@ export function scanSources(files, configNames = new Set(), spaceByName = new Ma
     refs.push(...out.refs)
     blocksUnknown.push(...out.unknown)
   }
-  return { refs, dynamic, blocksUnknown, servoCalls, servoBindings, filesScanned: javaish.length, blkCount: blks.length, unreadable: [] }
+  return { refs, dynamic, blocksUnknown, servoCalls, servoBindings, filesScanned: javaish.length, blkCount: blks.length, unreadable: [], codeDigest }
 }
 
 export function scanCodeDir(dir, configNames = new Set(), spaceByName = new Map()) {

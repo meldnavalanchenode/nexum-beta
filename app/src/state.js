@@ -85,7 +85,7 @@ const evidence = (id, result, source, method, summary) => {
  *  the same door with no config file at all. When a second platform grows a
  *  real adapter, these parameters become an adapter-built observation
  *  bundle; the state format, digesting, and change detection do not move. */
-export function buildVerifiedState({ robotId = 'robot', version, configName, configXml, devices, checkVerdict, checkFindingCounts, robot, stimulus, results, engineVersion, now, declaredBy = 'xml-parse', declaredByHuman = null, codeGit = null }) {
+export function buildVerifiedState({ robotId = 'robot', version, configName, configXml, devices, checkVerdict, checkFindingCounts, robot, stimulus, results, engineVersion, now, declaredBy = 'xml-parse', declaredByHuman = null, codeGit = null, codeDigest = null, filesScanned = null, reportDigests = null, carriedOver = null }) {
   if (!Number.isInteger(version) || version < 1) throw new Error('state version must be a positive integer')
   if (checkVerdict === 'FAIL') throw new Error('Refusing to build a verified state over a FAILING check — fix the findings, re-verify, then save the state.')
   if (declaredBy !== 'xml-parse' && declaredBy !== 'hand') throw new Error(`illegal declared-layer source "${declaredBy}"`)
@@ -102,12 +102,34 @@ export function buildVerifiedState({ robotId = 'robot', version, configName, con
       `inventory "${configName}" declared by ${declaredByHuman}: ${devices.length} devices — a person's list, not read off the robot`))
   } else {
     ev.push(evidence('config-parsed', 'PASS', 'declared', 'xml-parse', `configuration "${configName}" parsed: ${devices.length} devices`))
-    ev.push(evidence('config-code-reconciled', 'PASS', 'declared', 'static-reconciliation',
-      `code↔config reconciliation ${checkVerdict}${checkFindingCounts ? ` (${checkFindingCounts.WARN ?? 0} WARN, ${checkFindingCounts.INFO ?? 0} INFO)` : ''}`))
+    // Reconciling against ZERO source files is not a pass — it is a
+    // reconciliation that never happened. It used to be recorded as PASS with
+    // coverage.reconciled ✓, so a baseline built over an empty or wrong
+    // --code folder looked identical to one built over real code.
+    const nothingScanned = filesScanned === 0
+    ev.push(evidence('config-code-reconciled', nothingScanned ? 'UNKNOWN' : 'PASS', 'declared', 'static-reconciliation',
+      nothingScanned
+        ? 'NO source files were scanned — nothing was reconciled against the configuration (check the --code path)'
+        : `code↔config reconciliation ${checkVerdict}${checkFindingCounts ? ` (${checkFindingCounts.WARN ?? 0} WARN, ${checkFindingCounts.INFO ?? 0} INFO)` : ''}${filesScanned != null ? ` over ${filesScanned} source file(s)` : ''}`))
   }
 
   // ── OBSERVED layer — only what a robot report actually established.
+  //
+  // A report that is byte-identical to the one already folded into the
+  // previous state is a RE-SUBMISSION, not a new measurement. Its rows are
+  // still recorded (dropping them would make the hardware appear to vanish
+  // and then reappear), but nothing it says can be a PASS: a resubmitted
+  // file must never satisfy a recheck that was owed.
+  const carried = new Set(carriedOver ?? [])
+  const downgradeFrom = (startIdx, flag) => {
+    if (!carried.has(flag)) return
+    for (let i = startIdx; i < ev.length; i++) {
+      if (ev[i].result !== 'PASS') continue
+      ev[i] = { ...ev[i], result: 'UNKNOWN', summary: `${ev[i].summary} — CARRIED OVER from the previous state's ${flag} report, not re-measured` }
+    }
+  }
   const observed = {}
+  const robotEvStart = ev.length
   if (robot) {
     observed.hubs = robot.hubs.map((h) => ({ address: h.address, firmware: normalizeFirmware(h.firmware) }))
     ev.push(evidence('hub-census', 'PASS', 'observed', 'lynx-census', `${observed.hubs.length} hub(s) answered: ${observed.hubs.map((h) => '@' + h.address).join(', ')}`))
@@ -137,6 +159,8 @@ export function buildVerifiedState({ robotId = 'robot', version, configName, con
       }
     }
   }
+  downgradeFrom(robotEvStart, 'robot')
+  const stimEvStart = ev.length
   if (stimulus) {
     observed.stimulus = { motors: [], servos: [] }
     for (const m of stimulus.motors ?? []) {
@@ -156,6 +180,8 @@ export function buildVerifiedState({ robotId = 'robot', version, configName, con
         : evidence(`servo-response:${s.name}`, 'UNKNOWN', 'observed', 'none', `"${s.name}" has no feedback and was not confirmed`))
     }
   }
+
+  downgradeFrom(stimEvStart, 'stimulus')
 
   // Recorded behavioral results (validation/robustness) fold in as evidence
   // with their human recorder — PHYSYNC never ran them, and the state says so.
@@ -183,7 +209,11 @@ export function buildVerifiedState({ robotId = 'robot', version, configName, con
     // codeGit records the SOFTWARE state the verification happened against —
     // {sha, dirty} when the code dir is a git repo, absent otherwise (absence
     // is honest ignorance, never a claim the code didn't change).
-    declared: { configName, configSha256: sha256(configXml), devices, source: declaredBy, ...(declaredByHuman ? { declaredBy: declaredByHuman } : {}), ...(codeGit?.sha ? { codeGit: { sha: codeGit.sha, dirty: codeGit.dirty === true } } : {}) },
+    // codeDigest is a CONTENT hash of every source file scanned, so an
+    // uncommitted edit (or a TeamCode folder that is not a git repo at all) is
+    // still a detectable change. filesScanned records HOW MUCH was read, so a
+    // state can never silently claim "reconciled" over an empty folder.
+    declared: { configName, configSha256: sha256(configXml), devices, source: declaredBy, ...(declaredByHuman ? { declaredBy: declaredByHuman } : {}), ...(codeGit?.sha ? { codeGit: { sha: codeGit.sha, dirty: codeGit.dirty === true } } : {}), ...(codeDigest ? { codeDigest } : {}), ...(filesScanned != null ? { filesScanned } : {}), ...(reportDigests && Object.keys(reportDigests).length ? { reportDigests } : {}) },
     observed,
     coverage: {
       hubs: !!robot,
@@ -311,11 +341,23 @@ export function rederivedFrom(state, candidate, changes = []) {
   // row rather than confirming it.
   const hubsDisturbed = changes.some((c) => /^(hub-missing|hub-added|firmware-changed)$/.test(c.kind))
   if (!hubsDisturbed && candidate.hubs.length) out.add('hub-census')
+  const priorSensors = new Map((state.observed?.sensors ?? []).map((s) => [s.name, s]))
+  const declaredType = new Map((candidate.devices ?? []).map((d) => [d.name, d.type]))
   for (const s of candidate.sensors ?? []) {
     // determinable + answered = a fresh PASS for that sensor. Anything else
     // (zeros, error, a hub pin whose liveness is never determinable) is a
     // fresh UNKNOWN or FAIL, which re-derives no prior PASS.
-    if (s.determinable && s.read === 'ok') out.add(`sensor-liveness:${s.name}`)
+    if (!(s.determinable && s.read === 'ok')) continue
+    // IDENTITY: "the same fact again" requires the same DEVICE. A different
+    // part answering at the same name re-derives nothing — it contradicts the
+    // row. (This let a report saying "camera is a RevColorSensorV3" mark the
+    // HuskyLens evidence RE-DERIVED, then freeze it as a verified PASS.)
+    const prior = priorSensors.get(s.name)
+    if (prior && prior.type && s.type && prior.type !== s.type) continue
+    // And it must still be the device the CONFIG declares at that name.
+    const dt = declaredType.get(s.name)
+    if (dt && s.type && dt !== s.type) continue
+    out.add(`sensor-liveness:${s.name}`)
   }
   const drifted = new Set(changes.filter((c) => c.kind === 'fingerprint-drift').map((c) => c.component))
   for (const f of candidate.fingerprints ?? []) {
@@ -361,9 +403,20 @@ export function detectChanges(state, candidate, { now, fingerprintDefs = [] } = 
     gaps.push('configuration (no config supplied)')
   }
 
-  // Software state — compared only when BOTH sides recorded a git sha (the
-  // UI can't know the code's repo; a missing side is ignorance, not a change).
-  if (candidate.codeGit?.sha && state.declared.codeGit?.sha && candidate.codeGit.sha !== state.declared.codeGit.sha) {
+  // Software state. The CONTENT digest is authoritative because it needs no
+  // git: an uncommitted edit, or a TeamCode folder that was never a repo,
+  // changes it. (Before this, a code-only change — the single most common
+  // real change an FTC team makes — was reported as "0 change(s)".) The git
+  // sha is kept as a second, more legible signal when both sides have one.
+  if (candidate.codeDigest && state.declared.codeDigest && candidate.codeDigest !== state.declared.codeDigest) {
+    const gitNote = candidate.codeGit?.sha && state.declared.codeGit?.sha
+      ? ` (git ${state.declared.codeGit.sha.slice(0, 8)} → ${candidate.codeGit.sha.slice(0, 8)}${candidate.codeGit.dirty ? ', uncommitted edits' : ''})`
+      : candidate.codeGit?.dirty ? ' (uncommitted edits)' : ''
+    changes.push(change('software-changed', 'software',
+      state.declared.codeDigest.slice(0, 12) + '…',
+      candidate.codeDigest.slice(0, 12) + '…' + gitNote,
+      'declared', 'source-content-sha256', now))
+  } else if (candidate.codeGit?.sha && state.declared.codeGit?.sha && candidate.codeGit.sha !== state.declared.codeGit.sha) {
     changes.push(change('software-changed', 'software',
       state.declared.codeGit.sha.slice(0, 12) + (state.declared.codeGit.dirty ? ' (dirty)' : ''),
       candidate.codeGit.sha.slice(0, 12) + (candidate.codeGit.dirty ? ' (dirty)' : ''),
@@ -397,6 +450,29 @@ export function detectChanges(state, candidate, { now, fingerprintDefs = [] } = 
     }
     for (const [name, c] of seen) {
       if (!prior.has(name)) changes.push(change('sensor-added', `sensor "${name}"`, null, c.type, 'observed', 'liveness-read', now))
+    }
+    // DECLARED ↔ OBSERVED. Until now the two layers were only ever compared
+    // against their own past, never against each other — so the config could
+    // declare a sensor the robot has never reported and nothing said a word,
+    // or the robot could answer with a different PART than the config names
+    // and the state recorded both contradictory facts as fine. This is the
+    // product's own tagline ("the robot you built is the robot your software
+    // thinks you built") and it was the one comparison nobody ran.
+    // Only when the report ACTUALLY carried a census. An empty sensors list
+    // means "no census was taken" (a hub- or fingerprint-only report), not
+    // "the census found nothing" — the format cannot distinguish them, and
+    // claiming a gap for every declared sensor on every such run is noise
+    // that teaches a team to ignore the one time it matters.
+    const I2C_SENSOR = /Color|Distance|Husky|Imu|Gyro|2m|OTOS|Navx|Potentiometer|Touch|Limit/i
+    for (const d of (candidate.sensors.length ? candidate.devices ?? [] : [])) {
+      if (!I2C_SENSOR.test(d.type ?? '')) continue // motors/servos never appear in a liveness report
+      const obs = seen.get(d.name)
+      if (!obs) {
+        gaps.push(`device "${d.name}" (${d.type}) is DECLARED in the configuration but does not appear in the robot report — nothing was established about it`)
+      } else if (obs.type && d.type && obs.type !== d.type) {
+        changes.push(change('declared-observed-mismatch', `device "${d.name}"`,
+          `configuration declares ${d.type}`, `robot reports ${obs.type}`, 'observed', 'declared-vs-observed', now))
+      }
     }
   } else if (state.coverage.sensors) {
     gaps.push('sensor liveness (state has sensor evidence; no robot report supplied)')

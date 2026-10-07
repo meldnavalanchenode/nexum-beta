@@ -24,17 +24,17 @@ export function renderTerminal(findings, context) {
       : verdict(findings)
   lines.push('')
   const banner = {
-    PASS: `${C.green}${C.bold}  ██ PHYSYNC PREFLIGHT: PASS ██${C.reset}`,
-    FAIL: `${C.red}${C.bold}  ██ PHYSYNC PREFLIGHT: FAIL ██${C.reset}`,
-    DRIFT: `${C.yellow}${C.bold}  ██ PHYSYNC: CONFIG DRIFTED SINCE LAST PASS ██${C.reset}`,
-    'NO DRIFT': `${C.green}${C.bold}  ██ PHYSYNC: NO DRIFT SINCE LAST PASS ██${C.reset}`,
-    'SENSORS PASS': `${C.green}${C.bold}  ██ PHYSYNC SENSORS: ALL ANSWERING ██${C.reset}`,
-    'SENSORS NONE': `${C.yellow}${C.bold}  ██ PHYSYNC SENSORS: NOTHING VERIFIABLE HERE ██${C.reset}`,
-    'SENSORS FAIL': `${C.red}${C.bold}  ██ PHYSYNC SENSORS: A SENSOR IS NOT ANSWERING ██${C.reset}`,
-    'STIMULUS PASS': `${C.green}${C.bold}  ██ PHYSYNC STIMULUS: PASS ██${C.reset}`,
-    'STIMULUS FAIL': `${C.red}${C.bold}  ██ PHYSYNC STIMULUS: FAIL — do not queue this robot ██${C.reset}`,
-    'GATE PASS': `${C.green}${C.bold}  ██ PHYSYNC GATE: STILL THE ROBOT YOU APPROVED ██${C.reset}`,
-    'GATE FAIL': `${C.red}${C.bold}  ██ PHYSYNC GATE: NOT THE ROBOT YOU APPROVED ██${C.reset}`,
+    PASS: `${C.green}${C.bold}  ██ NEXUM PREFLIGHT: PASS ██${C.reset}`,
+    FAIL: `${C.red}${C.bold}  ██ NEXUM PREFLIGHT: FAIL ██${C.reset}`,
+    DRIFT: `${C.yellow}${C.bold}  ██ NEXUM: CONFIG DRIFTED SINCE LAST PASS ██${C.reset}`,
+    'NO DRIFT': `${C.green}${C.bold}  ██ NEXUM: NO DRIFT SINCE LAST PASS ██${C.reset}`,
+    'SENSORS PASS': `${C.green}${C.bold}  ██ NEXUM SENSORS: ALL ANSWERING ██${C.reset}`,
+    'SENSORS NONE': `${C.yellow}${C.bold}  ██ NEXUM SENSORS: NOTHING VERIFIABLE HERE ██${C.reset}`,
+    'SENSORS FAIL': `${C.red}${C.bold}  ██ NEXUM SENSORS: A SENSOR IS NOT ANSWERING ██${C.reset}`,
+    'STIMULUS PASS': `${C.green}${C.bold}  ██ NEXUM STIMULUS: PASS ██${C.reset}`,
+    'STIMULUS FAIL': `${C.red}${C.bold}  ██ NEXUM STIMULUS: FAIL — do not queue this robot ██${C.reset}`,
+    'GATE PASS': `${C.green}${C.bold}  ██ NEXUM GATE: STILL THE ROBOT YOU APPROVED ██${C.reset}`,
+    'GATE FAIL': `${C.red}${C.bold}  ██ NEXUM GATE: NOT THE ROBOT YOU APPROVED ██${C.reset}`,
   }
   lines.push(banner[v])
   if (context.mode === 'gate') {
@@ -90,7 +90,7 @@ const safe = (s) => String(s).replace(/[&<>|[\]`*_#!]/g, (ch) => (
 export function renderMarkdown(findings, context) {
   const v = verdict(findings)
   const out = []
-  out.push(`# PHYSYNC preflight — ${v}`)
+  out.push(`# NEXUM preflight — ${v}`)
   out.push(`${context.deviceCount} configured devices · ${context.refCount} code references across ${context.filesScanned} files · engine v${ENGINE_VERSION}`)
   out.push('')
   if (findings.length === 0) out.push('Every code reference resolves; no collisions, no conflicts.')
@@ -105,6 +105,6 @@ export function renderMarkdown(findings, context) {
     }
     out.push('')
   }
-  out.push(`_PHYSYNC — the robot you built is the robot your software thinks you built._`)
+  out.push(`_NEXUM — the robot you built is the robot your software thinks you built._`)
   return out.join('\n')
 }

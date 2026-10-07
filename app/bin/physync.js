@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PHYSYNC CLI — thin route layer; all logic in src/.
+// NEXUM CLI — thin route layer; all logic in src/.
 //   physync check --config <config.xml> --code <TeamCodeDir> [--report out.md]
 //   physync snapshot --config <config.xml>       record the current PASS state
 //   physync diff --config <config.xml>           what changed since the snapshot
@@ -7,6 +7,7 @@
 // Exit codes: 0 PASS · 1 could not run · 2 FAIL (CI-able).
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { parseConfigXml, toSnapshot } from '../src/configXml.js'
 import { scanCodeDir } from '../src/codeScan.js'
@@ -23,7 +24,7 @@ import { loadGraph, saveGraph, validateEdge, effectiveEdges } from '../src/graph
 import { plan, APPLICABILITY } from '../src/planner.js'
 import { loadReported, recordReported, reportedSince, asChange } from '../src/reported.js'
 import { predict, markRevealed, debrief, assignVerdict, closeExperiment, openExperiment, listExperiments } from '../src/experiment.js'
-import { loadTests, saveTests, validateTestDef, appendResult, loadResults, latestResults, detectRegressions } from '../src/results.js'
+import { loadTests, saveTests, validateTestDef, appendResult, loadResults, latestResults, detectRegressions, TESTS_FILE } from '../src/results.js'
 import { loadFingerprintDefs } from '../src/fingerprints.js'
 import { parseInventory, toStateDevices } from '../src/inventory.js'
 import { RULE_PACKS, packEdges } from '../src/packs.js'
@@ -38,6 +39,7 @@ const opt = (name, fallback = null) => {
   return value
 }
 const usage = `usage:
+  physync init  --config <config.xml> --code <TeamCodeDir> --by <yourName>   ← START HERE (one-time setup)
   physync check --config <config.xml> --code <TeamCodeDir> [--report out.md] [--json]
   physync explain --config <config.xml> --code <TeamCodeDir>   (check + AI explanation; needs credentials + internet)
   physync snapshot --config <config.xml>
@@ -67,6 +69,34 @@ const usage = `usage:
   physync pull [--host 192.168.43.1:5555] [--out pulled/]`
 function die(msg) { console.error(msg); process.exit(1) }
 
+// Carefully-worded integrity messages used to reach the user as a raw Node
+// stack trace: the ledger loader throws, nothing catches it, and ONE damaged
+// file under .physync took down every command — including the ones that could
+// have dug the team out. A beta tester seeing an ES-module traceback concludes
+// the tool is broken, which is both bad and, in the recovery case, wrong.
+process.on('uncaughtException', (err) => {
+  const msg = err?.message ?? String(err)
+  console.error(`\n  Nexum stopped: ${msg}\n`)
+  if (/integrity check|not a physync state|unsupported state format|ledger line|must be \{/.test(msg)) {
+    console.error('  A file under .physync is damaged or was edited by hand. Your ROBOT is fine —')
+    console.error('  this is only Nexum\'s own record. To see which file and recover:')
+    console.error('    ls .physync/states                 # the versions on record')
+    console.error('    mv .physync .physync-broken        # set the whole record aside, then')
+    console.error('    node app/bin/physync.js state --config <xml> --code <dir>   # start a fresh V1')
+    console.error('  Please send us .physync-broken (states + results only, no source code) — a')
+    console.error('  damaged ledger is a bug on our side, not yours.\n')
+  } else if (err?.code === 'ENOENT') {
+    console.error('  A file Nexum expected is not there. Check the path you passed, or re-run')
+    console.error('  `node app/bin/physync.js init --config <xml> --code <dir> --by <you>`.\n')
+  } else if (err?.code === 'EACCES' || err?.code === 'EPERM' || err?.code === 'EROFS') {
+    console.error('  Nexum could not write to this folder. Run it from a directory you own.\n')
+  } else {
+    console.error('  That is an unhandled error — a bug worth reporting. Send us the command you')
+    console.error('  ran and this message; nothing in your verified history has been changed.\n')
+  }
+  process.exit(1)
+})
+
 const KNOWN_FLAGS = {
   check: ['config', 'code', 'report', 'json'],
   explain: ['config', 'code'],
@@ -89,6 +119,7 @@ const KNOWN_FLAGS = {
   debrief: ['checked', 'notes', 'by', 'json'],
   verdict: ['verdict', 'basis', 'by', 'json'],
   experiment: ['json'],
+  init: ['config', 'code', 'by', 'pack', 'json'],
   pull: ['host', 'out'],
 }
 
@@ -96,6 +127,7 @@ const KNOWN_FLAGS = {
 // with no flags. Friction at the exact moment a robot just changed is the
 // product's enemy; UNKNOWN-by-absence is always preferred over demanding
 // full configuration, and reuse is always announced, never silent.
+const sha256Hex = (buf) => createHash('sha256').update(buf).digest('hex')
 const INPUTS_FILE = '.physync/inputs.json'
 const recallInputs = () => { try { return JSON.parse(readFileSync(INPUTS_FILE, 'utf8')) } catch { return {} } }
 const rememberInputs = (o) => { try { mkdirSync('.physync', { recursive: true }); writeFileSync(INPUTS_FILE, JSON.stringify(o, null, 2)) } catch { /* memory is a convenience, never a failure */ } }
@@ -104,10 +136,29 @@ const reuseRememberedInputs = () => {
   const rem = recallInputs()
   if (!rem.config) return
   const reused = []
-  for (const k of ['config', 'code', 'robot', 'stimulus']) {
-    if (!opt(k) && rem[k] && existsSync(rem[k])) { args.push(`--${k}`, rem[k]); reused.push(`--${k} ${rem[k]}`) }
+  // ONLY config and code: those are re-READ from disk every run, so reusing
+  // the path re-derives nothing — it just saves typing. A --robot or
+  // --stimulus file is a MEASUREMENT of a moment, and replaying the one that
+  // produced the baseline made that baseline's own evidence count as freshly
+  // re-established: rechecks silently vanished and a stale row was labelled
+  // RE-DERIVED. A measurement is never remembered; it must be taken again.
+  const moved = []
+  for (const k of ['config', 'code']) {
+    if (opt(k)) continue
+    if (rem[k] && existsSync(rem[k])) { args.push(`--${k}`, rem[k]); reused.push(`--${k} ${rem[k]}`) }
+    else if (rem[k]) moved.push([k, rem[k]])
   }
   if (reused.length) console.log(`  (using remembered inputs: ${reused.join(' · ')} — pass flags to override)`)
+  // A remembered path that no longer resolves used to fall through to a
+  // 25-line usage dump — in the exact mid-panic moment the zero-flag command
+  // exists to serve. Say what moved, and what to type.
+  if (moved.length) {
+    console.error(`\n  Nexum remembered ${moved.map(([k, p]) => `--${k} ${p}`).join(' and ')}, but ${moved.length > 1 ? 'those paths are' : 'that path is'} no longer there.`)
+    console.error('  Files get moved and renamed — nothing is wrong with your robot or your history.')
+    console.error(`  Run it once with the current path and Nexum will remember the new one:`)
+    console.error(`    node app/bin/physync.js ${cmd} ${moved.map(([k]) => `--${k} <path>`).join(' ')}\n`)
+    process.exit(1)
+  }
 }
 
 /** The code's git state, when the code dir is a repo — honest null otherwise. */
@@ -188,9 +239,77 @@ function runCheck() {
     refCount: code.refs.length,
     filesScanned: code.filesScanned,
     blkCount: code.blkCount,
+    codeDigest: code.codeDigest,
     engineVersion: ENGINE_VERSION,
   }
   return { findings, context }
+}
+
+if (cmd === 'init') {
+  // ONE command that gets a team from "cloned the repo" to "ready to run the
+  // loop". Before this existed, the documented path produced "0 recheck(s)
+  // owed" — honest, and useless — because a team had no tests defined and no
+  // dependency rules approved, so there was nothing to reason about. Six
+  // undocumented commands stood between a new user and the product working.
+  //
+  // It is deliberately NOT magic: it scaffolds CANDIDATES and prints exactly
+  // what a human must still decide. It approves nothing on anyone's behalf.
+  const by = opt('by') ?? die('physync init needs --by <yourName> — setup decisions carry the name of whoever made them.')
+  const configPath = opt('config') ?? die('physync init needs --config <yourconfig.xml> (pull it from the Robot Controller: /sdcard/FIRST/*.xml)')
+  const codeDir = opt('code') ?? die('physync init needs --code <YourTeamCodeFolder>')
+  if (!existsSync(configPath)) die(`Config not found: ${configPath}`)
+  if (!existsSync(codeDir)) die(`TeamCode folder not found: ${codeDir}`)
+  const packName = opt('pack') ?? 'camera-pose'
+
+  mkdirSync('.physync', { recursive: true })
+  const notes = []
+
+  // 1 · tests.json — a starting vocabulary of checks a team actually runs.
+  // Thresholds are left UNSET on purpose: a threshold is an engineering
+  // decision with an author, and we are not that author.
+  if (existsSync(TESTS_FILE)) {
+    notes.push(`tests already defined (${loadTests('.').length}) — left alone`)
+  } else {
+    saveTests([
+      { id: 'drive-straight', kind: 'validation', label: 'robot drives straight over a set distance' },
+      { id: 'localization', kind: 'validation', label: 'robot knows where it is on the field' },
+      { id: 'camera-pose', kind: 'validation', label: 'camera pose calibration' },
+    ], '.')
+    notes.push('3 starter checks defined in .physync/tests.json (rename/add/remove freely)')
+  }
+
+  // 2 · candidate dependency rules — PROPOSED, inert, awaiting a human.
+  let proposed = 0
+  try {
+    const g = loadGraph('.')
+    const existing = new Set(g.custom.map((e) => `${e.from}→${e.to}`))
+    const fresh = packEdges(packName).filter((e) => !existing.has(`${e.from}→${e.to}`))
+    if (fresh.length) {
+      for (const e of fresh) validateEdge({ ...e, proposedAt: new Date().toISOString() }, { requireApproved: false })
+      saveGraph([...g.custom, ...fresh.map((e) => ({ ...e, proposedAt: new Date().toISOString() }))])
+    }
+    proposed = fresh.length
+  } catch (e) { die(`Could not load rule pack "${packName}": ${e.message}`) }
+
+  console.log(`\n  NEXUM is set up for this robot.  (by ${by})\n`)
+  for (const n of notes) console.log(`    · ${n}`)
+  console.log(`    · ${proposed} candidate dependency rule(s) from the "${packName}" pack — PROPOSED, and they do NOTHING yet`)
+  console.log('\n  ONE DECISION IS YOURS — Nexum will not make it for you:')
+  console.log('  A dependency rule says "if X changes, re-check Y". Nexum does not know')
+  console.log('  whether that is true of YOUR robot, so every rule stays inert until')
+  console.log('  someone on your team approves it by name:\n')
+  const g2 = loadGraph('.')
+  for (const e of g2.custom.filter((e) => e.status === 'proposed')) {
+    console.log(`    ${e.from} → ${e.to}`)
+    console.log(`      physync graph --approve ${e.id} --by ${by}`)
+  }
+  console.log('\n  THEN, the beta loop (4 commands, in this order):')
+  console.log(`    1. physync state --config ${configPath} --code ${codeDir}     ← freeze today's robot as V1`)
+  console.log('    2. physync predict --checks "a, b" --by <name>   ← BEFORE a change: what YOU would re-check')
+  console.log('    3. physync status                                ← AFTER the change: what Nexum says')
+  console.log('    4. physync debrief --checked "a, b" --by <name>  ← what you actually did')
+  console.log('\n  Step 2 matters most: it must happen BEFORE step 3, or the comparison is lost.\n')
+  process.exit(0)
 }
 
 if (cmd === 'check') {
@@ -545,6 +664,22 @@ if (cmd === 'state') {
   const configBytes = readFileSync(configPath)
   const configName = basename(configPath).replace(/\.(xml|json)$/i, '')
   let robot = null, stimulus = null
+  // A measurement file carries no timestamp, so a byte-identical report is
+  // indistinguishable from a fresh one — and folding the PREVIOUS baseline's
+  // report into the NEW state asserts a measurement that was never taken.
+  // (The same protection recorded results already get via staleFolds.)
+  const priorState = latestState('.')
+  // A re-submitted measurement is DROPPED, not folded — and never blocks the
+  // save. (Same shape as staleFolds for recorded results: the team may have
+  // done real work worth keeping; what they must not get is a verified state
+  // asserting a measurement nobody retook. Absence is then recorded honestly
+  // as a coverage gap, which is exactly what it is.)
+  const staleReports = []
+  for (const [flag, label] of [['robot', 'robot report'], ['stimulus', 'stimulus report']]) {
+    if (!opt(flag) || !priorState) continue
+    const seen = priorState.declared?.reportDigests?.[flag]
+    if (seen && seen === sha256Hex(readFileSync(opt(flag)))) staleReports.push({ flag, label })
+  }
   if (opt('robot')) {
     try { robot = parseRobotReport(readFileSync(opt('robot'), 'utf8')) } catch (e) { die(`Cannot read robot report: ${e.message}`) }
   }
@@ -552,6 +687,8 @@ if (cmd === 'state') {
     try { stimulus = parseStimulusReport(readFileSync(opt('stimulus'), 'utf8')) } catch (e) { die(`Cannot read stimulus report: ${e.message}`) }
     if (stimulus.aborted) die('Refusing to fold an aborted stimulus pass into a verified state.')
   }
+  const reportDigests = {}
+  for (const f of ['robot', 'stimulus']) if (opt(f)) reportDigests[f] = sha256Hex(readFileSync(opt(f)))
   const counts = { WARN: findings.filter((f) => f.severity === 'WARN').length, INFO: findings.filter((f) => f.severity === 'INFO').length }
   // Recorded behavioral results newer than the previous baseline belong to
   // THIS verification cycle — they fold in as human-recorded evidence.
@@ -592,6 +729,15 @@ if (cmd === 'state') {
       : parseConfigXml(configBytes.toString('utf8')).devices.map((d) => ({ name: d.name, type: d.type, port: d.port, bus: d.bus ?? null })),
     checkVerdict: v, checkFindingCounts: counts, robot, stimulus, results: cycleResults, engineVersion: ENGINE_VERSION,
     codeGit: inventory ? null : gitStateOf(opt('code')),
+    codeDigest: inventory ? null : (context?.codeDigest ?? null),
+    filesScanned: inventory ? null : (context?.filesScanned ?? null),
+    reportDigests,
+    // Carried-over, not re-measured: the file is byte-identical to the one
+    // already folded into the previous state. The observed layer is still
+    // RECORDED (dropping it would make the next run see the hardware
+    // "reappear"), but every row it produces is UNKNOWN rather than PASS —
+    // a re-submitted file must never satisfy an owed recheck.
+    carriedOver: staleReports.map((s) => s.flag),
     ...(inventory ? { declaredBy: 'hand', declaredByHuman: inventory.declaredBy } : {}),
   })
   const path = saveState(state)
@@ -616,6 +762,10 @@ if (cmd === 'state') {
     console.log(`    reports VALIDATION FAILED against V${state.version} until that evidence is re-derived passing.`)
   }
   console.log(`  coverage: hubs ${state.coverage.hubs ? '✓' : '—'} · sensors ${state.coverage.sensors ? '✓' : '—'} · stimulus ${state.coverage.stimulus ? '✓' : '—'} · reconciled ${state.coverage.reconciled ? '✓' : '—'}`)
+  for (const s of staleReports) {
+    console.log(`  ⚠ NOT folded: the ${s.label} was byte-identical to the one already in V${priorState.version} — the same measurement, not a new one.`)
+    console.log(`     Nothing it would have established is claimed here; re-run it and save again, or accept the coverage gap.`)
+  }
   for (const r of staleFolds) {
     console.log(`  ⚠ NOT folded: test:${r.testId} (${r.verdict}, ${r.recordedAt}) — recorded BEFORE a reported change put it in question; re-run it against the current robot.`)
   }
@@ -647,7 +797,16 @@ if (cmd === 'predict') {
   if (rec.prediction.checks.length) console.log(`  predicted checks: ${rec.prediction.checks.join(' · ')}`)
   if (rec.prediction.note) console.log(`  note: "${rec.prediction.note}"`)
   console.log('  This prediction is IMMUTABLE once a status run reveals Nexum\'s answer.')
-  console.log('  Next: run physync status — then do the work — then physync debrief.\n')
+  // The comparison is an exact set match, so the team has to be told the
+  // vocabulary it is matched against — otherwise "camera calibration" vs
+  // "camera-pose" reads as a disagreement that never happened.
+  const known = (() => { try { return loadTests('.').map((t) => t.id) } catch { return [] } })()
+  if (known.length) {
+    console.log(`\n  Name checks the way Nexum does, so the comparison lines up. Yours are:`)
+    console.log(`    ${known.join(' · ')}`)
+    console.log('    (plus: check · preflight · stimulus — see them in `physync tests`)')
+  }
+  console.log('\n  Next: run physync status — then do the work — then physync debrief.\n')
   process.exit(0)
 }
 
@@ -663,8 +822,18 @@ if (cmd === 'debrief') {
   console.log(`    prediction beyond Nexum:           ${d.predictionBeyondNexum.join(', ') || '—'}`)
   console.log(`    recommended but not performed:     ${d.recommendedNotPerformed.join(', ') || '—'}   (EXTRA WORK candidates — human verdict decides)`)
   console.log(`    performed though unrecommended:    ${d.performedUnrecommended.join(', ') || '—'}   (NEXUM MISSED candidates — human verdict decides)`)
-  console.log(`\n  Assign the verdict per ledger/SHADOW-PROTOCOL.md:`)
-  console.log('    physync verdict --verdict HELPED|"NO VALUE"|"EXTRA WORK"|MISSED|AMBIGUOUS --basis "<rule cited>" --by <you>')
+  // The verdict definitions are printed HERE, in full. They used to point at
+  // ledger/SHADOW-PROTOCOL.md — a file that does not ship — which left the
+  // tester citing a rulebook they could not read.
+  console.log('\n  Now YOU assign the verdict (Nexum never grades itself). The definitions:')
+  console.log('    HELPED      Nexum named a check you had not planned, you did it, and it')
+  console.log('                mattered — it found something, or you would have skipped it.')
+  console.log('    NO VALUE    Nexum\'s list was contained in yours. Nothing new.')
+  console.log('    EXTRA WORK  You did a Nexum-only check, it passed, and it felt unnecessary.')
+  console.log('    MISSED      Something went wrong later that traced back to this change,')
+  console.log('                and Nexum never named it.')
+  console.log('    AMBIGUOUS   Anything else. This is a real answer — use it freely.')
+  console.log('    physync verdict --verdict HELPED|"NO VALUE"|"EXTRA WORK"|MISSED|AMBIGUOUS --basis "<why, one sentence>" --by <you>')
   console.log('  Then close the loop: perform owed checks, record results, physync state …\n')
   process.exit(0)
 }
@@ -776,6 +945,7 @@ if (cmd === 'status') {
     configName: basename(configPath).replace(/\.(xml|json)$/i, ''),
     configXml: readFileSync(configPath),
     codeGit: inventory ? null : gitStateOf(opt('code')),
+    codeDigest: inventory ? null : (context?.codeDigest ?? null),
   }
   if (opt('robot')) {
     let robot
@@ -846,7 +1016,14 @@ if (cmd === 'status') {
         // a fresh recorded PASS re-derives the evidence it covers — the
         // applicability table must agree with the satisfaction decision
         for (const t of req.targets) {
-          const row = revalidation.applicability?.find((a) => a.evidenceId === t.replace(' (no recorded result — UNKNOWN)', ''))
+          const id = t.replace(' (no recorded result — UNKNOWN)', '')
+          // A folded calibration result lives under `test:X` while the graph
+          // demands `calibration:X` — the same referent. Without the alias the
+          // lookup missed and the row stayed REVALIDATE beside a plan that
+          // said it was satisfied: the table contradicting the same screen.
+          const alias = id.startsWith('calibration:') ? `test:${id.slice(12)}` : id.startsWith('test:') ? `calibration:${id.slice(5)}` : null
+          const row = revalidation.applicability?.find((a) => a.evidenceId === id)
+            ?? (alias ? revalidation.applicability?.find((a) => a.evidenceId === alias) : undefined)
           if (row && row.applicability === APPLICABILITY.REVALIDATE) {
             row.applicability = APPLICABILITY.REDERIVED
             row.reasonCodes = []
@@ -879,6 +1056,20 @@ if (cmd === 'status') {
   // never enter the math.
   const regressions = detectRegressions(realResults)
 
+  // The reconciliation row cannot read "still applies" while THIS run's
+  // reconciliation is failing — the row's own subject is refuted on the same
+  // screen. (No graph edge covers it: a fresh check re-derives reconciliation
+  // directly, so the honest source is the live finding count, not a path.)
+  if (failFindings > 0 && revalidation?.applicability) {
+    for (const row of revalidation.applicability) {
+      if (row.evidenceId !== 'config-code-reconciled' && row.evidenceId !== 'config-parsed') continue
+      if (row.applicability === APPLICABILITY.APPLICABLE || row.applicability === APPLICABILITY.REDERIVED) {
+        row.applicability = APPLICABILITY.REVALIDATE
+        row.reasonCodes = ['CONFIGURATION_CHANGED']
+        row.reason = `this run's config↔code reconciliation is FAILING (${failFindings} finding(s)) — the baseline's passing reconciliation does not describe today's robot`
+      }
+    }
+  }
   const status = deploymentStatus({ failFindings: failFindings + resultFailures, changes, gaps })
   // SHADOW MODE reveal — the first status after a prediction stamps the
   // moment Nexum's answer became visible, and snapshots that answer. The
@@ -1076,6 +1267,22 @@ if (cmd === 'graph') {
     validateEdge(edge)
     saveGraph(g.custom)
     console.log(`Edge ${id} approved by ${by}: ${edge.from} → ${edge.to} — it now affects invalidation and planning.`)
+    // An approved edge whose `from` is not a node Nexum can ever emit is
+    // INERT — and status would then say "no known dependency connects it to
+    // any change" about a dependency literally on record. Say so here, while
+    // the person who wrote it is still looking.
+    const EMITTED = /^(configuration|software|device:|hub:|firmware:|sensor:|fingerprint:)/
+    if (!EMITTED.test(edge.from)) {
+      const reported = new Set(loadReported('.').map((r) => r.component))
+      if (!reported.has(edge.from)) {
+        console.log(`\n  ⚠ Nothing fires this rule yet. Changes Nexum DETECTS are named`)
+        console.log('    configuration · software · device:<name> · hub:<addr> · firmware:<addr> · sensor:<name> · fingerprint:<id>')
+        console.log(`    "${edge.from}" is none of those, so this edge only activates when a person reports`)
+        console.log(`    a change with exactly that component name:`)
+        console.log(`      physync change --component ${edge.from} --note "<what happened>" --by <name>`)
+        console.log(`    If you meant the configured device "${edge.from}", the node id is  device:${edge.from}`)
+      }
+    }
     process.exit(0)
   }
   if (args.includes('--json')) {

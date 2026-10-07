@@ -244,7 +244,10 @@ test('CLI: status shows invalidated evidence, the minimum plan, and satisfied-th
   assert.match(r.out, /INVALIDATED EVIDENCE/)
   assert.match(r.out, /servo-response:claw/)
   assert.match(r.out, /REQUIRED REVALIDATION \(minimum set/)
-  assert.match(r.out, /Stimulus pass/)
+  // the stimulus action's label names the BY-HAND check: the OpMode it used
+  // to name does not ship, and sending a beta team after a missing file is a
+  // dead end (the action id is still `stimulus`)
+  assert.match(r.out, /actuators still move as expected/)
   assert.ok(!/motor-response:claw/.test(r.out), 'a servo never owes a motor test')
   assert.match(r.out, /SATISFIED BY THIS RUN/)
   // untouched evidence now APPEARS — but only as explicitly APPLICABLE,

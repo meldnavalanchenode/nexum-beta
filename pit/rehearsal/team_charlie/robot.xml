@@ -1,1 +1,0 @@
-<Robot type="FirstInspires-FTC"><LynxUsbDevice name="P" serialNumber="C" parentModuleAddress="173"><LynxModule name="Control Hub" port="173"><Servo name="claw" port="0" /><Servo name="arm" port="0" /></LynxModule></LynxUsbDevice></Robot>
