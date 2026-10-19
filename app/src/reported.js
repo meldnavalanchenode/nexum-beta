@@ -21,7 +21,8 @@
 // else reads it, no existing file changes shape, and deleting the file returns
 // the tool to its previous behaviour exactly.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'node:fs'
+import { readFileSync, mkdirSync, existsSync } from 'node:fs'
+import { writeAtomic } from './io.js'
 import { join } from 'node:path'
 
 export const REPORTED_FILE = '.physync/reported.json'
@@ -75,9 +76,7 @@ export function recordReported({ component, note = '', by, at }, dir = '.') {
   // must never leave a half-written reported.json — a torn record of a human
   // claim is worse than no record, because it fails every later load.
   const path = join(dir, REPORTED_FILE)
-  const tmp = `${path}.tmp-${process.pid}`
-  writeFileSync(tmp, JSON.stringify({ format: REPORTED_FORMAT, reports: [...existing, record] }, null, 2))
-  renameSync(tmp, path)
+  writeAtomic(path, JSON.stringify({ format: REPORTED_FORMAT, reports: [...existing, record] }, null, 2))
   return record
 }
 

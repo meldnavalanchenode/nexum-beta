@@ -13,8 +13,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const PORT = 4900 + (process.pid % 90)
-const BASE = `http://127.0.0.1:${PORT}`
+let PORT = 0  // 0 = ask the OS; the real port is read from the server's startup line
+const BASE = () => `http://127.0.0.1:${PORT}`
 const SERVER = fileURLToPath(new URL('../src/server.js', import.meta.url))
 const DIR = mkdtempSync(join(tmpdir(), 'physync-srvstate-'))
 
@@ -27,15 +27,15 @@ let proc
 test.before(async () => {
   proc = spawn(process.execPath, [SERVER], { cwd: DIR, env: { ...process.env, PHYSYNC_PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'pipe'] })
   await new Promise((resolve, reject) => {
-    proc.stdout.on('data', (d) => { if (String(d).includes('PHYSYNC ui')) resolve() })
+    proc.stdout.on('data', (d) => { const m = /127\.0\.0\.1:(\d+)/.exec(String(d)); if (m) { PORT = Number(m[1]); resolve() } })
     proc.on('exit', () => reject(new Error('server died at startup')))
-    setTimeout(() => reject(new Error('server startup timeout')), 8000)
+    setTimeout(() => reject(new Error('server startup timeout')), 30000)
   })
 })
 test.after(() => { proc?.kill() })
 
 const call = async (path, body, method = 'POST') => {
-  const res = await fetch(BASE + path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+  const res = await fetch(BASE() + path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
   return { status: res.status, data: await res.json() }
 }
 

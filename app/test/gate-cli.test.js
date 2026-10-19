@@ -127,7 +127,10 @@ test('approve: generates the gate key once at mode 600 and reuses it', () => {
   const keyPath = join(dir, '.physync/gate.key')
   const key = readFileSync(keyPath, 'utf8')
   assert.match(key.trim(), /^[0-9a-f]{64}$/)
-  assert.equal(statSync(keyPath).mode & 0o777, 0o600)
+  // Windows has no POSIX permission bits (chmod is a near no-op and stat
+  // reports 0o666) -- the 600 guarantee is only testable, and only made,
+  // on POSIX hosts. The generate-once-and-reuse half still runs everywhere.
+  if (process.platform !== 'win32') assert.equal(statSync(keyPath).mode & 0o777, 0o600)
   approve(dir, ['--force'])
   assert.equal(readFileSync(keyPath, 'utf8'), key, 'the key survives re-approval')
 })

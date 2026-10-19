@@ -15,12 +15,13 @@ import { renderMarkdown } from './report.js'
 import { ENGINE_VERSION, checkMeta } from './registry.js'
 import { buildApproval, validateApproval, compareApproval } from './approval.js'
 import { parseRobotReport, analyzeSensors } from './sensors.js'
-import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode, rederivedFrom } from './state.js'
+import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy } from './state.js'
 import { loadGraph, saveGraph, validateEdge, effectiveEdges, matchNode } from './graph.js'
-import { plan, APPLICABILITY } from './planner.js'
-import { markRevealed, closeExperiment } from './experiment.js'
-import { loadReported, recordReported, reportedSince, asChange } from './reported.js'
-import { loadTests, loadResults, latestResults, detectRegressions, appendResult } from './results.js'
+import { plan } from './planner.js'
+import { closeExperiment } from './experiment.js'
+import { assess, foldResults } from './assess.js'
+import { recordReported } from './reported.js'
+import { loadTests, loadResults, detectRegressions, appendResult } from './results.js'
 import { loadFingerprintDefs } from './fingerprints.js'
 
 const PORT = Number(process.env.PHYSYNC_PORT ?? 4620)
@@ -302,66 +303,29 @@ const server = createServer(async (req, res) => {
       const failFindings = r.findings.filter((f) => f.severity === 'FAIL').length
       let fingerprintDefs = []
       try { fingerprintDefs = loadFingerprintDefs('.') } catch (e) { return json(res, 500, { error: e.message }) }
-      const { changes, gaps, standing } = detectChanges(base, c.candidate, { fingerprintDefs })
-      // Self-reported physical changes since the baseline — same merge as the
-      // CLI, same provenance, rendered separately by the UI.
-      changes.push(...reportedSince(loadReported('.'), base.createdAt).map(asChange))
 
-      let revalidation = null
-      let resultFailures = 0
-      // Same satisfaction rules as the CLI, or the UI and the terminal would
-      // disagree about the same robot: simulated results satisfy nothing,
-      // a result must postdate the human-reported change it answers, and a
-      // standing recorded FAIL counts whether or not any change demanded it.
-      const allResults = loadResults('.')
-      const realResults = allResults.filter((r2) => r2.simulated !== true)
-      const recent = latestResults(realResults, { after: base.createdAt })
-      const recentSimulated = latestResults(allResults.filter((r2) => r2.simulated === true), { after: base.createdAt })
-      const consumedTests = new Set()
-      if (changes.length) {
-        const satisfied = new Set()
-        if (failFindings === 0) satisfied.add('check')
-        // per-row re-derivation, same rule as the CLI (see rederivedFrom)
-        const rederivedTargets = rederivedFrom(base, c.candidate, changes)
-        revalidation = plan({ state: base, changes, graph: loadGraph('.'), satisfiedActions: satisfied, rederivedTargets })
-        const reportedAt = new Map(changes.filter((ch) => ch.source === 'human' && ch.at).map((ch) => [ch.id, ch.at]))
-        const cutoffFor = (rq) => (rq.becauseIds ?? []).reduce((m, id) => { const t = reportedAt.get(id); return t != null && t > m ? t : m }, base.createdAt)
-        const stillRequired = []
-        for (const req2 of revalidation.required) {
-          const bareId = req2.action.startsWith('test:') ? req2.action.slice(5) : req2.action.startsWith('calibration:') ? req2.action.slice(12) : null
-          const recorded = bareId != null ? recent.get(bareId) : null
-          const simulatedOnly = bareId != null && !recorded ? recentSimulated.get(bareId) : null
-          if (bareId != null) consumedTests.add(bareId)
-          const cutoff = cutoffFor(req2)
-          if (recorded && recorded.recordedAt <= cutoff) stillRequired.push({ ...req2, label: `${req2.label} — latest result (${recorded.verdict}, ${recorded.recordedAt}) PREDATES the reported change it must answer; re-run` })
-          else if (recorded?.verdict === 'PASS') {
-            revalidation.satisfiedThisRun.push({ ...req2, label: `${req2.label} — PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}` })
-            for (const t of req2.targets) {
-              const row = revalidation.applicability?.find((a) => a.evidenceId === t.replace(' (no recorded result — UNKNOWN)', ''))
-              if (row && row.applicability === APPLICABILITY.REVALIDATE) { row.applicability = APPLICABILITY.REDERIVED; row.reasonCodes = []; row.reason = `PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}` }
-            }
-          }
-          else if (recorded?.verdict === 'FAIL') { resultFailures++; stillRequired.push({ ...req2, label: `${req2.label} — LATEST RESULT IS FAIL (${recorded.value ?? 'explicit'})` }) }
-          else if (simulatedOnly) stillRequired.push({ ...req2, label: `${req2.label} — only a SIMULATED result on file (${simulatedOnly.verdict}); simulated evidence satisfies nothing` })
-          else stillRequired.push(req2)
-        }
-        revalidation.required = stillRequired
+      // ONE assessment pipeline, shared with the CLI. This endpoint used to
+      // carry its own copy, which is how it ended up without the shadow-mode
+      // ordering guard and without the applicability/plan alias fix.
+      const a = assess({
+        base, candidate: c.candidate, failFindings, fingerprintDefs, dir: '.',
+        reveal: payload.reveal === true,
+      })
+      if (a.withheld) {
+        return json(res, 200, {
+          predictionRequired: true,
+          against: `V${base.version}`, baseCreatedAt: base.createdAt,
+          changes: a.changes, gaps: a.gaps, hint: a.hint,
+        })
       }
-      const standingFailures = [...recent.values()].filter((r2) => r2.verdict === 'FAIL' && !consumedTests.has(r2.testId))
-      resultFailures += standingFailures.length
-      const status = deploymentStatus({ failFindings: failFindings + resultFailures, changes, gaps })
-      // same shadow-mode reveal semantics as the CLI — one project dir, one truth
-      const shadow = changes.length === 0 ? null : markRevealed({
-        changes,
-        planActions: revalidation ? [...revalidation.required, ...revalidation.satisfiedThisRun].map((rq) => rq.action) : [],
-        applicabilityCounts: revalidation ? revalidation.applicability.reduce((m, a) => ({ ...m, [a.applicability]: (m[a.applicability] ?? 0) + 1 }), {}) : {},
-      }, '.')
+      const { changes, gaps, standing, revalidation, status, resultFailures, standingFailures, shadow } = a
+
       return json(res, 200, {
         status, against: `V${base.version}`, baseCreatedAt: base.createdAt,
         experiment: shadow ? { id: shadow.id, predictedAt: shadow.predictedAt, revealedAt: shadow.revealedAt } : null,
         failFindings, resultFailures, standingFailures, changes, gaps, standing, revalidation,
-        regressions: detectRegressions(realResults),
-        findings: r.findings, context: r.context, exit: statusExitCode(status),
+        regressions: a.regressions,
+        findings: r.findings, context: r.context, exit: a.exit,
       })
     }
 
@@ -381,26 +345,9 @@ const server = createServer(async (req, res) => {
       const prior = latestState('.')
       // Simulated results never fold into a verified state — demo data cannot
       // become evidence about a real robot by being saved.
-      let cycleResults = [...latestResults(loadResults('.').filter((r2) => r2.simulated !== true), { after: prior?.createdAt }).values()]
-      // Same fold rules as the CLI: a result recorded before a human-reported
-      // change that put its test in question is not evidence about this robot,
-      // and a FAIL never freezes into "verified" silently.
-      const absorbedReports = prior ? reportedSince(loadReported('.'), prior.createdAt).map(asChange) : []
-      let staleFolds = []
-      if (absorbedReports.length && cycleResults.length) {
-        const foldPlan = plan({ state: prior, changes: absorbedReports, graph: loadGraph('.') })
-        const reportAt = new Map(absorbedReports.map((ch) => [ch.id, ch.at]))
-        const cutoffByTest = new Map()
-        for (const rq of [...foldPlan.required, ...foldPlan.satisfiedThisRun]) {
-          const bare = rq.action.startsWith('test:') ? rq.action.slice(5) : rq.action.startsWith('calibration:') ? rq.action.slice(12) : null
-          if (bare == null) continue
-          const cut = (rq.becauseIds ?? []).reduce((m, id) => { const t = reportAt.get(id); return t != null && t > m ? t : m }, '')
-          if (cut) cutoffByTest.set(bare, cut)
-        }
-        staleFolds = cycleResults.filter((r2) => cutoffByTest.has(r2.testId) && r2.recordedAt <= cutoffByTest.get(r2.testId))
-        cycleResults = cycleResults.filter((r2) => !staleFolds.includes(r2))
-      }
-      const failFolds = cycleResults.filter((r2) => r2.verdict === 'FAIL')
+      // Shared with the CLI (src/assess.js). Only the refusal differs: a
+      // terminal dies, an endpoint returns 409.
+      const { cycleResults, staleFolds, failFolds, absorbedReports } = foldResults({ prior, dir: '.' })
       if (failFolds.length) {
         return json(res, 409, { error: `Refusing to save a verified state holding FAILING recorded results — ${failFolds.map((r2) => `test:${r2.testId}`).join(', ')}. Verification means a human vouched for a working robot; record a passing re-run first.` })
       }
@@ -520,5 +467,12 @@ const server = createServer(async (req, res) => {
 })
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`PHYSYNC ui → http://127.0.0.1:${PORT} (loopback only; nothing leaves this machine)`)
+  // Report the port actually BOUND, not the one requested. PHYSYNC_PORT=0 asks
+  // the OS for any free port, which is the only way concurrent test processes
+  // each get a server without racing for a fixed number. Three suites derived
+  // their port from `pid % 90` off the same base 4700 and collided on CI,
+  // where pid allocation differs from a dev laptop — the loser died with
+  // EADDRINUSE and its suite sat until an 8-second timeout.
+  const bound = server.address()?.port ?? PORT
+  console.log(`PHYSYNC ui → http://127.0.0.1:${bound} (loopback only; nothing leaves this machine)`)
 })

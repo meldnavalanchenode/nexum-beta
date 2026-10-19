@@ -21,7 +21,8 @@
 //     a guessed equivalence would manufacture agreement
 //   · one experiment open at a time; abandonment is recorded, not deleted
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, renameSync } from 'node:fs'
+import { readFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
+import { writeAtomic } from './io.js'
 import { join } from 'node:path'
 
 export const EXPERIMENTS_DIR = '.physync/experiments'
@@ -51,9 +52,7 @@ export function openExperiment(dir = '.') {
 const save = (e, dir) => {
   mkdirSync(join(dir, EXPERIMENTS_DIR), { recursive: true })
   // atomic — a torn experiment record is a corrupted experiment
-  const tmp = fileFor(dir, e.id) + `.tmp-${process.pid}`
-  writeFileSync(tmp, JSON.stringify(e, null, 2))
-  renameSync(tmp, fileFor(dir, e.id))
+  writeAtomic(fileFor(dir, e.id), JSON.stringify(e, null, 2))
   return e
 }
 

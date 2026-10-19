@@ -26,7 +26,8 @@
 //   same-suffix  from 'device:$n' to 'motor-response:$n' — $n carries the
 //                matched name across the edge, so one rule covers every device
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, mkdirSync, existsSync } from 'node:fs'
+import { writeAtomic } from './io.js'
 import { join } from 'node:path'
 
 export const GRAPH_FILE = '.physync/graph.json'
@@ -88,12 +89,34 @@ export function loadGraph(dir = '.') {
 
 export function saveGraph(custom, dir = '.') {
   mkdirSync(join(dir, '.physync'), { recursive: true })
-  writeFileSync(join(dir, GRAPH_FILE), JSON.stringify({ edges: custom }, null, 2))
+  writeAtomic(join(dir, GRAPH_FILE), JSON.stringify({ edges: custom }, null, 2))
 }
 
-/** Only edges allowed to affect decisions: built-ins plus approved customs. */
+// An edge that can demand work must FAIL CLOSED. The original filter was a
+// denylist — `status !== 'proposed'` — so every value other than that one
+// string activated the edge: a typo ('propsed'), a status from a future
+// version, or a hand-written 'rejected' all silently became traversable, and
+// 'rejected' activating a rule is the exact inverse of what the word means.
+// Approval is what makes an edge real, so approval is what the filter tests.
+export const EDGE_STATUSES = Object.freeze({ PROPOSED: 'proposed', APPROVED: 'approved' })
+
+// A status-less edge is legitimate and ACTIVE: a mechanical rule authored
+// directly (`deterministic-rule` / `manufacturer-doc` provenance, which
+// validateEdge already enforced) carries no approval because there is no
+// judgment to approve — fixtures/graph.json ships seven of them. What must
+// not happen is an edge with an explicit status this version does not
+// understand being treated as active.
+const KNOWN_STATUS = (s) => s == null || s === EDGE_STATUSES.APPROVED || s === EDGE_STATUSES.PROPOSED
+
+/** Only edges allowed to affect decisions: built-ins, approved customs, and
+ *  status-less customs whose provenance was validated at load. */
 export const effectiveEdges = (graph) =>
-  [...graph.builtin, ...graph.custom.filter((e) => e.status !== 'proposed')]
+  [...graph.builtin, ...graph.custom.filter((e) => e.status == null || e.status === EDGE_STATUSES.APPROVED)]
+
+/** Custom edges carrying a status this version does not recognize. They are
+ *  inert (see above) — this exists so callers can SAY so, rather than letting
+ *  a typo quietly disable a rule the team believes is active. */
+export const unrecognizedEdges = (graph) => graph.custom.filter((e) => !KNOWN_STATUS(e.status))
 
 // ── matching ───────────────────────────────────────────────────────────────
 

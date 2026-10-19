@@ -41,7 +41,10 @@ export async function explainFindings({ verdict, findings, context }) {
   try {
     ({ default: Anthropic } = await import('@anthropic-ai/sdk'))
   } catch {
-    return { ok: false, reason: 'AI assist needs the Anthropic SDK — run `npm install` once in physync/app. The verdict above is complete without it.' }
+    // Declared as an OPTIONAL peer dependency, so it is deliberately absent
+    // from a default install — the beta loop is offline and must not pay a
+    // 17 MB download for a feature the README tells teams not to use.
+    return { ok: false, reason: 'AI assist needs the Anthropic SDK — run `npm install @anthropic-ai/sdk`. The verdict above is complete without it.' }
   }
   // Zero-arg client: resolves ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an
   // `ant auth login` profile automatically.

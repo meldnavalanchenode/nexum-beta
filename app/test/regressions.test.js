@@ -270,18 +270,22 @@ test('R3: walker survives unreadable subdirs and symlink cycles without crashes 
   const { symlinkSync, chmodSync } = await import('node:fs')
   const dir = mkdtempSync(join(tmpdir(), 'physync-walk-'))
   writeFileSync(join(dir, 'Op.java'), 'm = hardwareMap.get(DcMotor.class, "m");')
+  // chmod 0o000 cannot make a directory unreadable on win32, so the
+  // unreadable-dir half of this test only exists on POSIX; the symlink-cycle
+  // half (the rescan guard) runs everywhere.
+  const posix = process.platform !== 'win32'
   mkdirSync(join(dir, 'secret'))
-  chmodSync(join(dir, 'secret'), 0o000)
+  if (posix) chmodSync(join(dir, 'secret'), 0o000)
   symlinkSync(dir, join(dir, 'self'))
   let out
   try {
     out = scanCodeDir(dir, new Set(['m']))
   } finally {
-    chmodSync(join(dir, 'secret'), 0o755)
+    if (posix) chmodSync(join(dir, 'secret'), 0o755)
   }
   assert.equal(out.filesScanned, 1, 'symlink cycle must not rescan')
   assert.equal(out.refs.length, 1)
-  assert.ok(out.unreadable.includes('secret'), 'unreadable dir surfaced, not crashed')
+  if (posix) assert.ok(out.unreadable.includes('secret'), 'unreadable dir surfaced, not crashed')
 })
 
 test('AI assist: prompt builder is pure and complete; explainFindings never throws and never touches the verdict path', async () => {

@@ -79,7 +79,13 @@ test('the camera-pose pack, loaded but unapproved, changes nothing — the repor
   loadPack(dir)
   report(dir)
   const j = statusJson(dir)
-  assert.equal(j.status, 'REVALIDATION REQUIRED', 'a reported change still demands human attention')
+  // UNMAPPED rather than REVALIDATION REQUIRED, and this scenario is exactly
+  // why: the planner established nothing, so "revalidation required · 0 owed"
+  // announced a work list that did not exist. The change still demands human
+  // attention — exit 3, surfaced for hand review below — the banner is just
+  // honest that this is ignorance rather than a plan.
+  assert.equal(j.status, 'CHANGED — IMPACT NOT MAPPED', 'nothing was established, and the headline says so')
+  assert.equal(j.exit, 3, 'a reported change still demands attention — never a clean exit')
   assert.equal(j.revalidation.required.length, 0, 'proposed edges must generate NO requirements')
   assert.equal(j.revalidation.invalidated.length, 0, 'proposed edges must invalidate NOTHING')
   assert.ok(

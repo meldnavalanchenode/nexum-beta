@@ -347,8 +347,17 @@ export function reconcile(config, code) {
   }
 
   // 12. unparsed — surfaced, never dropped.
+  //
+  // An unknown TAG is a WARN: it may be an element this engine does not model
+  // and nothing was lost. A malformed ATTRIBUTE is different in kind — a
+  // device was removed from the model, so its ports were never compared and
+  // its name never reconciled against the code. Reporting PASS there would
+  // assert "every reference resolves, no collisions" about devices we never
+  // saw, which is exactly the overclaim this tool exists to refuse.
   for (const u of config.unparsed) {
-    findings.push(finding('unparsed', `Could not confidently parse: ${u.text}`, [`config line ${u.line}`], 'Review by hand.'))
+    findings.push(u.droppedDevice
+      ? { ...finding('unparsed', `Could not confidently parse: ${u.text}`, [`config line ${u.line}`], 'Fix the quoting and re-run. Until then this configuration cannot be checked.'), severity: 'FAIL' }
+      : finding('unparsed', `Could not confidently parse: ${u.text}`, [`config line ${u.line}`], 'Review by hand.'))
   }
 
   return findings

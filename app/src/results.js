@@ -16,7 +16,8 @@
 // fail the LOAD loudly (a ledger you can silently lose lines from is not a
 // ledger). Definitions: .physync/tests.json, human-authored.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'node:fs'
+import { readFileSync, mkdirSync, existsSync, appendFileSync } from 'node:fs'
+import { writeAtomic } from './io.js'
 import { join } from 'node:path'
 
 export const TESTS_FILE = '.physync/tests.json'
@@ -57,7 +58,7 @@ export function loadTests(dir = '.') {
 
 export function saveTests(tests, dir = '.') {
   mkdirSync(join(dir, '.physync'), { recursive: true })
-  writeFileSync(join(dir, TESTS_FILE), JSON.stringify({ tests }, null, 2))
+  writeAtomic(join(dir, TESTS_FILE), JSON.stringify({ tests }, null, 2))
 }
 
 // ── the verdict rule ───────────────────────────────────────────────────────

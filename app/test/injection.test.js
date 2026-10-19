@@ -115,32 +115,32 @@ test('sanitizeLine: newlines/tabs become spaces; every other C0/C1 becomes visib
 })
 
 // ── CSRF on the local server ────────────────────────────────────────────────
-const PORT = 4800 + (process.pid % 90)
-const BASE = `http://127.0.0.1:${PORT}`
+let PORT = 0  // 0 = ask the OS; the real port is read from the server's startup line
+const BASE = () => `http://127.0.0.1:${PORT}`
 const SERVER = fileURLToPath(new URL('../src/server.js', import.meta.url))
 const DIR = mkdtempSync(join(tmpdir(), 'physync-csrf-'))
 let proc
 test.before(async () => {
   proc = spawn(process.execPath, [SERVER], { cwd: DIR, env: { ...process.env, PHYSYNC_PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'pipe'] })
   await new Promise((resolve, reject) => {
-    proc.stdout.on('data', (d) => { if (String(d).includes('PHYSYNC ui')) resolve() })
+    proc.stdout.on('data', (d) => { const m = /127\.0\.0\.1:(\d+)/.exec(String(d)); if (m) { PORT = Number(m[1]); resolve() } })
     proc.on('exit', () => reject(new Error('server died at startup')))
-    setTimeout(() => reject(new Error('server startup timeout')), 8000)
+    setTimeout(() => reject(new Error('server startup timeout')), 30000)
   })
 })
 test.after(() => { proc?.kill() })
 
 test('cross-origin and non-JSON writes are refused; same-machine JSON writes still work', async () => {
   const body = JSON.stringify({ component: 'camera-position', note: 'forged', by: 'attacker' })
-  const evil = await fetch(`${BASE}/change`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body })
+  const evil = await fetch(`${BASE()}/change`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body })
   assert.equal(evil.status, 403)
-  const plain = await fetch(`${BASE}/change`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body })
+  const plain = await fetch(`${BASE()}/change`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body })
   assert.equal(plain.status, 415)
-  const del = await fetch(`${BASE}/approve`, { method: 'DELETE', headers: { origin: 'https://evil.example' } })
+  const del = await fetch(`${BASE()}/approve`, { method: 'DELETE', headers: { origin: 'https://evil.example' } })
   assert.equal(del.status, 403)
-  const ok = await fetch(`${BASE}/change`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+  const ok = await fetch(`${BASE()}/change`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })
   assert.equal(ok.status, 200, 'no-Origin JSON (CLI/curl/tests) still works')
-  const sameOrigin = await fetch(`${BASE}/change`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${PORT}` }, body: JSON.stringify({ component: 'camera-position', note: 'ok', by: 'Raghu' }) })
+  const sameOrigin = await fetch(`${BASE()}/change`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${PORT}` }, body: JSON.stringify({ component: 'camera-position', note: 'ok', by: 'Raghu' }) })
   assert.equal(sameOrigin.status, 200, 'the UI itself (same-machine origin) still works')
 })
 
@@ -150,7 +150,7 @@ test('POST /status sees fingerprint drift — the UI is no longer blind to physi
   const configXml = '<Robot type="FirstInspires-FTC"><LynxUsbDevice name="P" serialNumber="X" parentModuleAddress="173"><LynxModule name="Control Hub" port="173"><goBILDA5202SeriesMotor name="drive" port="0" /></LynxModule></LynxUsbDevice></Robot>'
   const files = [{ name: 'T.java', content: 'class T { void i(HardwareMap hardwareMap){ a = hardwareMap.get(DcMotor.class, "drive"); } }' }]
   const report = (x) => JSON.stringify({ physyncRobot: 1, hubs: [{ address: 173, parent: true, firmware: 'HW: 20, Maj: 1, Min: 8, Eng: 2' }], sensors: [], fingerprints: [{ id: 'imu-gravity', method: 'imu-gravity-rest', values: { x, y: 0, z: 0.98 } }] })
-  const post = (path, robotReport) => fetch(`${BASE}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ configXml, files, robotReport }) }).then(async (r) => ({ status: r.status, data: await r.json() }))
+  const post = (path, robotReport) => fetch(`${BASE()}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ configXml, files, robotReport }) }).then(async (r) => ({ status: r.status, data: await r.json() }))
   const saved = await post('/state', report(0.01))
   assert.equal(saved.status, 200, JSON.stringify(saved.data))
   const drifted = await post('/status', report(0.5)) // ~27° off — far past the 3° tolerance

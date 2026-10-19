@@ -111,9 +111,19 @@ node app/bin/physync.js state --config yourconfig.xml --code YourTeamCode   # �
 Use `--pass`, `--fail`, or `--unknown` — your judgment, recorded with your
 name. You can log a number instead (`--value 0.96`), but a number only
 becomes PASS or FAIL once *someone on your team* has set the bar it must
-clear (`tests --define … --min 0.9 --by yourName`). Until then Nexum records
-the number and says **UNKNOWN**, because a measurement with no threshold
-hasn't been judged yet — by anyone.
+clear. Until then Nexum records the number and says **UNKNOWN**, because a
+measurement with no threshold hasn't been judged yet — by anyone.
+
+To set that bar on any check — including the three `init` created:
+
+```bash
+node app/bin/physync.js tests --threshold --id localization --min 0.9 --by yourName
+```
+
+Changing a bar later is allowed and prints exactly what it changed, but
+**results you already recorded keep the verdict they were given.** A threshold
+is never applied retroactively, so history can't be re-graded by moving a
+goalpost.
 
 `debrief` prints the comparison: what you both named, what Nexum added, what
 you did that it never mentioned. It does **not** grade itself — that judgment
@@ -164,4 +174,4 @@ and rules — **not your source code**. Look inside first; it's plain JSON.
   robot on purpose.
 - VEX support exists but is not part of this beta.
 
-Questions or anything broken: raghavender.kora@gmail.com
+Questions or anything broken: ashrith.kora@gmail.com

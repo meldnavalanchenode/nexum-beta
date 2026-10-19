@@ -12,7 +12,8 @@ import { execFileSync } from 'node:child_process'
 import { parseConfigXml, toSnapshot } from '../src/configXml.js'
 import { scanCodeDir } from '../src/codeScan.js'
 import { reconcile, diffSnapshot, verdict } from '../src/engine.js'
-import { basename } from 'node:path'
+import { basename, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { renderTerminal, renderMarkdown } from '../src/report.js'
 import { ENGINE_VERSION } from '../src/registry.js'
 import { parseStimulusReport, toStimulusBaseline, analyzeStimulus, diffStimulus, validateStimulusBaseline } from '../src/stimulus.js'
@@ -21,24 +22,61 @@ import { buildApproval, validateApproval, compareApproval, verifyManifestHmac, n
 import { checkMeta } from '../src/registry.js'
 import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode, STATUSES, rederivedFrom } from '../src/state.js'
 import { loadGraph, saveGraph, validateEdge, effectiveEdges } from '../src/graph.js'
+import { assertNotNestedProject } from '../src/state.js'
+import { assess, foldResults } from '../src/assess.js'
 import { plan, APPLICABILITY } from '../src/planner.js'
-import { loadReported, recordReported, reportedSince, asChange } from '../src/reported.js'
-import { predict, markRevealed, debrief, assignVerdict, closeExperiment, openExperiment, listExperiments } from '../src/experiment.js'
-import { loadTests, saveTests, validateTestDef, appendResult, loadResults, latestResults, detectRegressions, TESTS_FILE } from '../src/results.js'
+import { loadReported, recordReported } from '../src/reported.js'
+import { predict, debrief, assignVerdict, closeExperiment, listExperiments } from '../src/experiment.js'
+import { loadTests, saveTests, validateTestDef, appendResult, loadResults, detectRegressions, TESTS_FILE } from '../src/results.js'
 import { loadFingerprintDefs } from '../src/fingerprints.js'
 import { parseInventory, toStateDevices } from '../src/inventory.js'
 import { RULE_PACKS, packEdges } from '../src/packs.js'
 
+// Writes to a PIPE are asynchronous, and process.exit() does not wait for
+// them — on macOS under Node 20 this reliably truncated `--json` output
+// mid-document when stdout was piped (CI caught it; any team's script could
+// have). Blocking writes make every byte land before any exit() fires. The
+// underscore API has been stable for a decade and is guarded so its absence
+// degrades to the old behavior rather than throwing.
+for (const s of [process.stdout, process.stderr]) s._handle?.setBlocking?.(true)
+
 const args = process.argv.slice(2)
 const cmd = args[0]
 const opt = (name, fallback = null) => {
+  // `--name=value` is the form most people type, and the unknown-flag check
+  // above ACCEPTS it (it strips the =value before validating). Reading only
+  // the space-separated form therefore discarded the value in silence: a team
+  // running `status --config=other.xml` was answered about whatever config was
+  // remembered from last time, told nothing, and shown a verdict for a robot
+  // they had not asked about.
+  const eq = args.find((a) => a.startsWith(`--${name}=`))
+  if (eq !== undefined) {
+    const value = eq.slice(name.length + 3)
+    if (!value) die(`--${name}= needs a value after the "=".\n${usage}`)
+    return value
+  }
   const i = args.indexOf(`--${name}`)
   if (i === -1) return fallback
   const value = args[i + 1]
   if (value == null || value.startsWith('--')) die(`--${name} needs a value.\n${usage}`)
   return value
 }
+
+// Number('') === 0 and Number('  ') === 0. A measurement flag that quietly
+// becomes 0 is a fabricated reading: it can clear a `--max` bar the real value
+// would have failed, and it is recorded as evidence with a human's name on it.
+const num = (name) => {
+  const raw = opt(name)
+  if (raw == null) return null
+  const v = Number(raw)
+  if (raw.trim() === '' || !Number.isFinite(v)) {
+    die(`--${name} needs a number — got ${JSON.stringify(raw)}. Nexum will not invent a measurement.`)
+  }
+  return v
+}
+
 const usage = `usage:
+  physync demo                                                 ← PROVE IT RUNS (bundled sample robot; it is meant to FAIL)
   physync init  --config <config.xml> --code <TeamCodeDir> --by <yourName>   ← START HERE (one-time setup)
   physync check --config <config.xml> --code <TeamCodeDir> [--report out.md] [--json]
   physync explain --config <config.xml> --code <TeamCodeDir>   (check + AI explanation; needs credentials + internet)
@@ -60,6 +98,7 @@ const usage = `usage:
   physync graph --propose --from <node> --to <node> [--note <why>]   (store a PROPOSED edge — never affects decisions until approved)
   physync graph --approve <edgeId> --by <humanName>            (a named human makes a proposed edge real)
   physync tests    [--define --id <id> --kind validation|robustness --label <text> [--min <n>] [--max <n>] --by <human>] [--json]
+  physync tests    --threshold --id <id> [--min <n>] [--max <n>] --by <human>   (set/change the bar on an EXISTING check; never re-grades past results)
   physync result   --test <id> [--value <n>] [--pass|--fail|--unknown] [--evidence <text>] [--notes <text>] --by <human>
   physync results  [--test <id>] [--json]                      (result history + regression detection)
   physync predict  --checks "a, b, c" [--note <text>] --by <name>   (SHADOW MODE: record your plan BEFORE seeing Nexum's — immutable once revealed)
@@ -104,6 +143,11 @@ process.on('uncaughtException', (err) => {
     console.error('  `node app/bin/physync.js init --config <xml> --code <dir> --by <you>`.\n')
   } else if (err?.code === 'EACCES' || err?.code === 'EPERM' || err?.code === 'EROFS') {
     console.error('  Nexum could not write to this folder. Run it from a directory you own.\n')
+  } else if (err?.physyncDiagnosed) {
+    // Nexum recognised this and the message above already says what to do.
+    // Calling it "a bug worth reporting" would send a team chasing us instead
+    // of following the instructions they were just given.
+    console.error('')
   } else {
     console.error('  That is an unhandled error — a bug worth reporting. Send us the command you')
     console.error('  ran and this message; nothing in your verified history has been changed.\n')
@@ -120,20 +164,20 @@ const KNOWN_FLAGS = {
   stimulus: ['file', 'baseline', 'json'],
   approve: ['config', 'code', 'robot', 'name', 'force', 'json'],
   gate: ['config', 'file', 'approval', 'json'],
-  state: ['config', 'code', 'robot', 'stimulus', 'declare', 'json'],
+  state: ['config', 'code', 'robot', 'stimulus', 'declare', 'json', 'accept-coverage-loss'],
   states: ['json'],
   status: ['config', 'code', 'robot', 'declare', 'json', 'reveal'],
   rules: ['pack', 'by', 'json'],
   change: ['component', 'note', 'by', 'list', 'json'],
   graph: ['propose', 'from', 'to', 'note', 'approve', 'by', 'json'],
-  tests: ['define', 'id', 'kind', 'label', 'min', 'max', 'by', 'json'],
+  tests: ['define', 'threshold', 'id', 'kind', 'label', 'min', 'max', 'by', 'json'],
   result: ['test', 'value', 'pass', 'fail', 'unknown', 'evidence', 'notes', 'by', 'method', 'simulated'],
   results: ['test', 'json'],
   predict: ['checks', 'note', 'by', 'abandon', 'json'],
   debrief: ['checked', 'notes', 'by', 'json'],
   verdict: ['verdict', 'basis', 'by', 'json'],
   experiment: ['json'],
-  init: ['config', 'code', 'by', 'pack', 'json'],
+  init: ['config', 'code', 'declare', 'by', 'pack', 'json'],
   pull: ['host', 'out'],
 }
 
@@ -146,7 +190,12 @@ const INPUTS_FILE = '.physync/inputs.json'
 const recallInputs = () => { try { return JSON.parse(readFileSync(INPUTS_FILE, 'utf8')) } catch { return {} } }
 const rememberInputs = (o) => { try { mkdirSync('.physync', { recursive: true }); writeFileSync(INPUTS_FILE, JSON.stringify(o, null, 2)) } catch { /* memory is a convenience, never a failure */ } }
 const reuseRememberedInputs = () => {
-  if (opt('declare') || opt('config')) return
+  // Per-flag, not all-or-nothing. Supplying ONE of --config/--code used to
+  // disable recall entirely, so `status --config other.xml` died on bare usage
+  // with no message — a team that typed half the command got a wall of help
+  // text and no idea which half was missing.
+  if (opt('declare')) return
+  if (opt('config') && opt('code')) return
   const rem = recallInputs()
   if (!rem.config) return
   const reused = []
@@ -226,9 +275,11 @@ const loadSnapshot = () => {
 }
 
 // Shared check pipeline — used by `check` and `explain`.
-function runCheck() {
-  const config = loadConfig()
-  const codeDir = opt('code') ?? die(usage)
+// `override` lets `demo` supply package-internal paths; every other caller
+// passes nothing and reads the team's own --config/--code flags as before.
+function runCheck(override = null) {
+  const config = override ? parseConfigXml(readFileSync(override.config, 'utf8')) : loadConfig()
+  const codeDir = override ? override.code : (opt('code') ?? die(usage))
   if (!existsSync(codeDir)) die(`Code directory not found: ${codeDir}`)
   if (!statSync(codeDir).isDirectory()) die(`--code must be a directory (got a file): ${codeDir}`)
   if (config.devices.length === 0 && config.webcams.length === 0) die('No devices found in that config XML — is it the active configuration file?')
@@ -269,12 +320,47 @@ if (cmd === 'init') {
   // It is deliberately NOT magic: it scaffolds CANDIDATES and prints exactly
   // what a human must still decide. It approves nothing on anyone's behalf.
   const by = opt('by') ?? die('physync init needs --by <yourName> — setup decisions carry the name of whoever made them.')
-  const configPath = opt('config') ?? die('physync init needs --config <yourconfig.xml> (pull it from the Robot Controller: /sdcard/FIRST/*.xml)')
-  const codeDir = opt('code') ?? die('physync init needs --code <YourTeamCodeFolder>')
-  if (!existsSync(configPath)) die(`Config not found: ${configPath}`)
-  if (!existsSync(codeDir)) die(`TeamCode folder not found: ${codeDir}`)
-  const packName = opt('pack') ?? 'camera-pose'
+  // Two platforms, two declared layers. FTC has a config XML to parse and code
+  // to reconcile it against; a hand-declared robot (VEX V5 and anything else
+  // without a readable configuration artifact) has a list a person wrote. The
+  // onboarding has to exist for BOTH or the second platform inherits the exact
+  // dead end --config/--code was built to fix: a documented path that ends in
+  // "0 recheck(s) owed" because nothing was ever scaffolded.
+  const declarePath = opt('declare')
+  const configPath = declarePath ? null : (opt('config') ?? die('physync init needs --config <yourconfig.xml> (pull it from the Robot Controller: /sdcard/FIRST/*.xml)\n   …or --declare <inventory.json> for a robot with no config file to read (VEX V5).'))
+  const codeDir = declarePath ? null : (opt('code') ?? die('physync init needs --code <YourTeamCodeFolder>'))
+  if (declarePath && !existsSync(declarePath)) {
+    // A "file not found" that leaves someone staring at a blank editor is a
+    // dead end too. Hand them the shape instead.
+    console.error(`Inventory not found: ${declarePath}\n`)
+    console.error('An inventory is a list of what your team SAYS is on the robot. Start from this:\n')
+    console.error(JSON.stringify({
+      format: 'physync-inventory-v1',
+      declaredBy: by,
+      platform: 'vex-v5',
+      devices: [
+        { name: 'leftDrive', type: 'Motor', port: 1 },
+        { name: 'rightDrive', type: 'Motor', port: 10 },
+        { name: 'imu', type: 'Inertial', port: 21 },
+      ],
+    }, null, 2))
+    console.error(`\nSave that as ${declarePath}, edit it to match your robot, then run init again.`)
+    process.exit(1)
+  }
+  if (configPath && !existsSync(configPath)) die(`Config not found: ${configPath}`)
+  if (codeDir && !existsSync(codeDir)) die(`TeamCode folder not found: ${codeDir}`)
+  // Validate the declaration NOW, not at first use — a malformed inventory
+  // should fail during setup, while someone is still paying attention.
+  let declaredPlatform = null
+  if (declarePath) {
+    try {
+      const inv = parseInventory(readFileSync(declarePath, 'utf8'))
+      declaredPlatform = inv.platform ?? null
+    } catch (e) { die(`That inventory is not usable: ${e.message}`) }
+  }
+  const packName = opt('pack') ?? (declarePath ? 'vex-v5' : 'camera-pose')
 
+  assertNotNestedProject('.')
   mkdirSync('.physync', { recursive: true })
   // Opt-in marker: this project is running the shadow-mode experiment, so
   // status will hold its answer until a prediction is on record.
@@ -287,12 +373,22 @@ if (cmd === 'init') {
   if (existsSync(TESTS_FILE)) {
     notes.push(`tests already defined (${loadTests('.').length}) — left alone`)
   } else {
-    saveTests([
-      { id: 'drive-straight', kind: 'validation', label: 'robot drives straight over a set distance' },
-      { id: 'localization', kind: 'validation', label: 'robot knows where it is on the field' },
-      { id: 'camera-pose', kind: 'validation', label: 'camera pose calibration' },
-    ], '.')
-    notes.push('3 starter checks defined in .physync/tests.json (rename/add/remove freely)')
+    // The starters must be checks the chosen rule pack actually points AT, or
+    // approving every rule still yields a plan that demands nothing — which is
+    // precisely the bug the FTC path had.
+    const starters = declarePath
+      ? [
+          { id: 'drive-straight', kind: 'validation', label: 'robot drives straight over a set distance' },
+          { id: 'turn-accuracy', kind: 'validation', label: 'robot turns to a commanded heading accurately' },
+          { id: 'object-detection', kind: 'validation', label: 'vision sensor detects the game object reliably' },
+        ]
+      : [
+          { id: 'drive-straight', kind: 'validation', label: 'robot drives straight over a set distance' },
+          { id: 'localization', kind: 'validation', label: 'robot knows where it is on the field' },
+          { id: 'camera-pose', kind: 'validation', label: 'camera pose calibration' },
+        ]
+    saveTests(starters, '.')
+    notes.push(`${starters.length} starter checks defined in .physync/tests.json (rename/add/remove freely)`)
   }
 
   // 2 · candidate dependency rules — PROPOSED, inert, awaiting a human.
@@ -321,11 +417,32 @@ if (cmd === 'init') {
     console.log(`      physync graph --approve ${e.id} --by ${by}`)
   }
   console.log('\n  THEN, the beta loop (4 commands, in this order):')
-  console.log(`    1. physync state --config ${configPath} --code ${codeDir}     ← freeze today's robot as V1`)
+  const freeze = declarePath
+    ? `physync state --declare ${declarePath}`
+    : `physync state --config ${configPath} --code ${codeDir}`
+  console.log(`    1. ${freeze}     ← freeze today's robot as V1`)
   console.log('    2. physync predict --checks "a, b" --by <name>   ← BEFORE a change: what YOU would re-check')
   console.log('    3. physync status                                ← AFTER the change: what Nexum says')
   console.log('    4. physync debrief --checked "a, b" --by <name>  ← what you actually did')
   console.log('\n  Step 2 matters most: it must happen BEFORE step 3, or the comparison is lost.\n')
+  process.exit(0)
+}
+
+// `demo` runs the preflight against the deliberately-broken sample robot that
+// ships INSIDE the package. It exists because the 60-second proof-it-runs step
+// must work identically from a git clone and from `npx` — under npx the team's
+// cwd is their own robot folder, which has no samples/ directory, so a relative
+// path in the README is guaranteed to ENOENT. Package-relative resolution is
+// the only form that survives both. (fileURLToPath, never .pathname — see the
+// Windows law in test/architecture.test.js.)
+if (cmd === 'demo') {
+  const root = fileURLToPath(new URL('../samples/', import.meta.url))
+  const { findings, context } = runCheck({ config: join(root, 'config.xml'), code: join(root, 'TeamCode') })
+  console.log(renderTerminal(findings, context))
+  console.log('  That robot is MEANT to fail — those are real mismatches in a sample,')
+  console.log('  not errors in your setup. Seeing them means Nexum works on this machine.\n')
+  console.log('  Next: set up your own robot —')
+  console.log('    physync init --config <yourconfig.xml> --code <YourTeamCode> --by <yourName>\n')
   process.exit(0)
 }
 
@@ -712,29 +829,9 @@ if (cmd === 'state') {
   const prior = latestState('.')
   // Simulated results never fold into a verified state: demo data cannot
   // become evidence about a real robot by being saved.
-  let cycleResults = [...latestResults(loadResults('.').filter((r) => r.simulated !== true), { after: prior?.createdAt }).values()]
-  // The same cutoff rule `status` enforces applies at the fold: a result
-  // recorded BEFORE a human-reported change that put its test in question
-  // describes a robot that no longer exists — folding it would launder the
-  // exact result status refuses to accept.
-  const absorbedReports = prior ? reportedSince(loadReported('.'), prior.createdAt).map(asChange) : []
-  let staleFolds = []
-  if (absorbedReports.length && cycleResults.length) {
-    const foldPlan = plan({ state: prior, changes: absorbedReports, graph: loadGraph('.') })
-    const reportAt = new Map(absorbedReports.map((c) => [c.id, c.at]))
-    const cutoffByTest = new Map()
-    for (const req of [...foldPlan.required, ...foldPlan.satisfiedThisRun]) {
-      const bare = req.action.startsWith('test:') ? req.action.slice(5) : req.action.startsWith('calibration:') ? req.action.slice(12) : null
-      if (bare == null) continue
-      const cut = (req.becauseIds ?? []).reduce((m, id) => { const t = reportAt.get(id); return t != null && t > m ? t : m }, '')
-      if (cut) cutoffByTest.set(bare, cut)
-    }
-    staleFolds = cycleResults.filter((r) => cutoffByTest.has(r.testId) && r.recordedAt <= cutoffByTest.get(r.testId))
-    cycleResults = cycleResults.filter((r) => !staleFolds.includes(r))
-  }
-  // And a FAIL never freezes into "verified" silently — the same rule the
-  // check verdict already gets, applied to behavioral results.
-  const failFolds = cycleResults.filter((r) => r.verdict === 'FAIL')
+  // Shared with the web UI (src/assess.js) — the fold rule is judgment, and
+  // judgment lives in one place. Only the refusal below is presentation.
+  const { cycleResults, staleFolds, failFolds, absorbedReports } = foldResults({ prior, dir: '.' })
   if (failFolds.length) {
     die(`Refusing to save a verified state holding FAILING recorded results — ${failFolds.map((r) => `test:${r.testId}${r.value != null ? ` (${r.value})` : ''}`).join(', ')}.\nVerification means a human vouched for a working robot, not a frozen record of known defects. Record a passing re-run first, or an explicit --unknown with notes on what changed.`)
   }
@@ -757,7 +854,8 @@ if (cmd === 'state') {
     carriedOver: staleReports.map((s) => s.flag),
     ...(inventory ? { declaredBy: 'hand', declaredByHuman: inventory.declaredBy } : {}),
   })
-  const path = saveState(state)
+  assertNotNestedProject('.')
+  const path = saveState(state, '.', { acceptCoverageLoss: args.includes('--accept-coverage-loss') })
   // Remember the inputs so the NEXT run — the one that happens mid-panic
   // after a robot change — needs zero flags.
   if (!inventory && opt('config')) rememberInputs({ config: opt('config'), code: opt('code'), ...(opt('robot') ? { robot: opt('robot') } : {}), ...(opt('stimulus') ? { stimulus: opt('stimulus') } : {}) })
@@ -976,118 +1074,20 @@ if (cmd === 'status') {
     : parseConfigXml(candidate.configXml.toString('utf8')).devices.map((d) => ({ name: d.name, type: d.type, port: d.port, bus: d.bus ?? null }))
   let fingerprintDefs = []
   try { fingerprintDefs = loadFingerprintDefs('.') } catch (e) { die(e.message) }
-  const { changes, gaps, standing } = detectChanges(base, candidate, { fingerprintDefs })
+  // ONE assessment pipeline, shared with the web UI (src/assess.js). Both
+  // surfaces carried their own copy and had already drifted in three places —
+  // the shadow-mode gate, the applicability/plan alias, and the baseline-FAIL
+  // accounting — each of which made the UI read more optimistic than the
+  // terminal about the same robot. Presentation stays here; judgment does not.
+  const assessment = assess({
+    base, candidate, failFindings, fingerprintDefs, dir: '.',
+    inventory: Boolean(inventory),
+    reveal: args.includes('--reveal'),
+  })
+  const { changes, gaps, standing } = assessment
+  const { revalidation, status, resultFailures, standingFailures, regressions, shadow } = assessment
+  const statusGraph = assessment.graph
 
-  // Self-reported physical changes made SINCE the baseline was saved. Older
-  // reports describe a robot that has since been re-verified, so they are
-  // history. These carry source 'human' all the way through and are rendered
-  // separately from anything detected.
-  const statusGraph = loadGraph('.')
-  const reported = reportedSince(loadReported('.'), base.createdAt).map(asChange)
-  changes.push(...reported)
-
-  // Phase 3: what did those changes invalidate, and what is the MINIMUM
-  // revalidation? Evidence re-derived by this very run counts as satisfied.
-  // Phase 4: recorded results newer than the baseline satisfy (PASS), doom
-  // (FAIL), or leave open (UNKNOWN) the demanded behavioral tests.
-  let revalidation = null
-  let resultFailures = 0
-  // Simulated results are excluded from satisfaction entirely (demo evidence
-  // cannot verify a real robot) but their presence is surfaced, not hidden.
-  const allResults = loadResults('.')
-  const realResults = allResults.filter((r) => r.simulated !== true)
-  const recent = latestResults(realResults, { after: base.createdAt })
-  const recentSimulated = latestResults(allResults.filter((r) => r.simulated === true), { after: base.createdAt })
-  const consumedTests = new Set()
-  if (changes.length) {
-    const satisfied = new Set()
-    // This run IS a fresh reconciliation — but only when one actually ran. A
-    // --declare run reconciles nothing, so an empty findings list must not be
-    // mistaken for a clean one. ('declare' is never auto-satisfied either: only
-    // a person walking the robot re-derives a hand-declared inventory.)
-    if (!inventory && failFindings === 0) satisfied.add('check')
-    // NOT satisfied.add('preflight'): that asserted a fresh report re-derived
-    // every census/liveness row, including ones it omitted or showed failing.
-    // Re-derivation is decided per row, by what the report actually says.
-    const rederivedTargets = rederivedFrom(base, candidate, changes)
-    revalidation = plan({ state: base, changes, graph: statusGraph, satisfiedActions: satisfied, rederivedTargets })
-
-    // A result can only answer a change made before it was recorded. Human-
-    // reported changes carry the moment the change was made known; a PASS
-    // recorded before that moment describes the robot as it used to be.
-    // Detected changes have no knowable change time, so their cutoff stays
-    // the baseline (all that can honestly be enforced).
-    const reportedAt = new Map(changes.filter((c) => c.source === 'human' && c.at).map((c) => [c.id, c.at]))
-    const cutoffFor = (req) => (req.becauseIds ?? []).reduce((m, id) => { const t = reportedAt.get(id); return t != null && t > m ? t : m }, base.createdAt)
-    const stillRequired = []
-    for (const req of revalidation.required) {
-      const bareId = req.action.startsWith('test:') ? req.action.slice(5) : req.action.startsWith('calibration:') ? req.action.slice(12) : null
-      const recorded = bareId != null ? recent.get(bareId) : null
-      const simulatedOnly = bareId != null && !recorded ? recentSimulated.get(bareId) : null
-      if (bareId != null) consumedTests.add(bareId)
-      const cutoff = cutoffFor(req)
-      if (recorded && recorded.recordedAt <= cutoff) {
-        stillRequired.push({ ...req, label: `${req.label} — latest result (${recorded.verdict}, ${recorded.recordedAt}) PREDATES the reported change it must answer; re-run` })
-      } else if (recorded?.verdict === 'PASS') {
-        revalidation.satisfiedThisRun.push({ ...req, label: `${req.label} — PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}` })
-        // a fresh recorded PASS re-derives the evidence it covers — the
-        // applicability table must agree with the satisfaction decision
-        for (const t of req.targets) {
-          const id = t.replace(' (no recorded result — UNKNOWN)', '')
-          // A folded calibration result lives under `test:X` while the graph
-          // demands `calibration:X` — the same referent. Without the alias the
-          // lookup missed and the row stayed REVALIDATE beside a plan that
-          // said it was satisfied: the table contradicting the same screen.
-          const alias = id.startsWith('calibration:') ? `test:${id.slice(12)}` : id.startsWith('test:') ? `calibration:${id.slice(5)}` : null
-          const row = revalidation.applicability?.find((a) => a.evidenceId === id)
-            ?? (alias ? revalidation.applicability?.find((a) => a.evidenceId === alias) : undefined)
-          if (row && row.applicability === APPLICABILITY.REVALIDATE) {
-            row.applicability = APPLICABILITY.REDERIVED
-            row.reasonCodes = []
-            row.reason = `PASS recorded ${recorded.recordedAt} by ${recorded.recordedBy}`
-          }
-        }
-      } else if (recorded?.verdict === 'FAIL') {
-        resultFailures++
-        stillRequired.push({ ...req, label: `${req.label} — LATEST RESULT IS FAIL (${recorded.value ?? 'explicit'}, ${recorded.recordedAt})` })
-      } else if (simulatedOnly) {
-        stillRequired.push({ ...req, label: `${req.label} — only a SIMULATED result on file (${simulatedOnly.verdict}); simulated evidence satisfies nothing` })
-      } else {
-        stillRequired.push(req) // missing or UNKNOWN: still owed. UNKNOWN never passes.
-      }
-    }
-    revalidation.required = stillRequired
-  }
-  // A recorded FAIL is a standing fact about the robot whether or not any
-  // change demanded that test. Surfacing it only during revalidation let a
-  // known-failing robot read as VERIFIED with an unchanged config.
-  const standingFailures = [...recent.values()].filter((r) => r.verdict === 'FAIL' && !consumedTests.has(r.testId))
-  resultFailures += standingFailures.length
-  // A baseline written before FAIL evidence was refused at build time (or by
-  // an older engine) must not keep reading as VERIFIED. The row is history
-  // and stays history; the STATUS stops claiming the robot is fine.
-  const baselineFailures = base.evidence.filter((e) => e.result === 'FAIL').map((e) => e.id)
-  resultFailures += baselineFailures.length
-  // Regressions are computed whether or not anything changed — hiding a real
-  // regression behind "no changes" was a lie of omission. Simulated results
-  // never enter the math.
-  const regressions = detectRegressions(realResults)
-
-  // The reconciliation row cannot read "still applies" while THIS run's
-  // reconciliation is failing — the row's own subject is refuted on the same
-  // screen. (No graph edge covers it: a fresh check re-derives reconciliation
-  // directly, so the honest source is the live finding count, not a path.)
-  if (failFindings > 0 && revalidation?.applicability) {
-    for (const row of revalidation.applicability) {
-      if (row.evidenceId !== 'config-code-reconciled' && row.evidenceId !== 'config-parsed') continue
-      if (row.applicability === APPLICABILITY.APPLICABLE || row.applicability === APPLICABILITY.REDERIVED) {
-        row.applicability = APPLICABILITY.REVALIDATE
-        row.reasonCodes = ['CONFIGURATION_CHANGED']
-        row.reason = `this run's config↔code reconciliation is FAILING (${failFindings} finding(s)) — the baseline's passing reconciliation does not describe today's robot`
-      }
-    }
-  }
-  const status = deploymentStatus({ failFindings: failFindings + resultFailures, changes, gaps })
   // SHADOW MODE reveal — the first status after a prediction stamps the
   // moment Nexum's answer became visible, and snapshots that answer. The
   // prediction is immutable from here on.
@@ -1112,10 +1112,8 @@ if (cmd === 'status') {
   // Gating everyone would hold the core feature hostage to a study they never
   // signed up for — the tool's job is to answer the question, and the beta is
   // our interest, not theirs.
-  const betaMode = existsSync('.physync/beta.json')
-  const armed = (() => { try { return openExperiment('.') } catch { return null } })()
-  const gateOrdering = betaMode && !armed && !args.includes('--reveal')
-  if (changes.length && gateOrdering && args.includes('--json')) {
+  const gateOrdering = assessment.withheld
+  if (gateOrdering && args.includes('--json')) {
     // Machine consumers get the same gate as a fact, not as prose.
     console.log(JSON.stringify({
       physync: 1, predictionRequired: true, against: `V${base.version}`, changes,
@@ -1124,7 +1122,7 @@ if (cmd === 'status') {
     }, null, 2))
     process.exit(statusExitCode(status))
   }
-  if (changes.length && gateOrdering) {
+  if (gateOrdering) {
     console.log(`\n  ${process.stdout.isTTY ? '\x1b[33m' : ''}██ ${changes.length} CHANGE(S) DETECTED — PREDICTION NOT YET RECORDED ██${process.stdout.isTTY ? '\x1b[0m' : ''}   (vs V${base.version})\n`)
     for (const c of changes) {
       console.log(c.source === 'human'
@@ -1137,13 +1135,8 @@ if (cmd === 'status') {
     console.log('  and it is the entire point of the beta — once you\'ve read Nexum\'s list,')
     console.log('  nobody can ever know what you would have checked on your own.')
     console.log(`\n  Not running the experiment? ${'node app/bin/physync.js status --reveal'} shows everything now.\n`)
-    process.exit(statusExitCode(status))
+    process.exit(3)
   }
-  const shadow = changes.length === 0 ? null : markRevealed({
-    changes,
-    planActions: revalidation ? [...revalidation.required, ...revalidation.satisfiedThisRun].map((r) => r.action) : [],
-    applicabilityCounts: revalidation ? revalidation.applicability.reduce((m, a) => ({ ...m, [a.applicability]: (m[a.applicability] ?? 0) + 1 }), {}) : {},
-  }, '.')
   const out = { physync: 1, status, against: `V${base.version}`, failFindings, resultFailures, standingFailures, changes, gaps, standing, revalidation, regressions, experiment: shadow ? { id: shadow.id, predictedAt: shadow.predictedAt, revealedAt: shadow.revealedAt } : null, exit: statusExitCode(status) }
   if (args.includes('--json')) {
     console.log(JSON.stringify(out, null, 2))
@@ -1154,14 +1147,39 @@ if (cmd === 'status') {
   console.log(`\n  ${process.stdout.isTTY ? paint : ''}██ ${status} ██${reset}   (vs verified state V${base.version}, ${base.createdAt})`)
   // One-line situation summary — the Sentry rule: lead with what happened
   // and what it costs, before any detail.
+  // "0 recheck(s) owed" is a true number and a misleading sentence: it reads as
+  // "nothing to do" when the real meaning is "nobody has told me how this robot
+  // is wired, so I cannot say". Say the second thing.
+  const nothingMapped = Boolean(revalidation) && changes.length > 0 &&
+    revalidation.invalidated.length === 0 && revalidation.required.length === 0 &&
+    revalidation.satisfiedThisRun.length === 0
   const sumBits = [
     `${changes.length} change(s)`,
-    revalidation ? `${revalidation.invalidated.length} evidence item(s) put in question` : null,
-    revalidation ? `${revalidation.required.length} recheck(s) owed` : null,
+    revalidation && !nothingMapped ? `${revalidation.invalidated.length} evidence item(s) put in question` : null,
+    revalidation && !nothingMapped ? `${revalidation.required.length} recheck(s) owed` : null,
+    nothingMapped ? 'NO approved rule connects it to any check — Nexum cannot say what it affected' : null,
     resultFailures ? `${resultFailures} failing result(s)` : null,
     gaps.length ? `${gaps.length} not compared` : null,
   ].filter(Boolean)
   console.log(`  ${sumBits.join(' · ')}\n`)
+  if (nothingMapped) {
+    // A stranger who skipped the one decision `init` asked for lands here.
+    // Name the decision, and print the command that makes it.
+    const proposed = (() => { try { return loadGraph('.').custom.filter((e) => e.status === 'proposed') } catch { return [] } })()
+    console.log('  WHY: a dependency rule says "if X changes, re-check Y". Nexum will not')
+    console.log('  assume one is true of YOUR robot, so rules stay inert until a named human')
+    console.log('  approves them. None are approved here, so nothing propagates.\n')
+    if (proposed.length) {
+      console.log(`  ${proposed.length} rule(s) are waiting on that decision — list them with:`)
+      console.log('    physync graph --json')
+      console.log('  then activate any you agree with:')
+      console.log(`    physync graph --approve ${proposed[0].id} --by <yourName>\n`)
+    } else {
+      console.log('  No candidate rules are loaded. To load a starting set:')
+      console.log('    physync rules --pack camera-pose --by <yourName>\n')
+    }
+    console.log('  This is an honest "I do not know" — not a clean bill of health.\n')
+  }
   if (inventory) {
     console.log(`  HAND-DECLARED ROBOT (${inventory.platformLabel}) — no configuration file was parsed and no`)
     console.log('  code was reconciled. What follows compares your declaration against the one you')
@@ -1363,9 +1381,52 @@ if (cmd === 'graph') {
 
 if (cmd === 'tests') {
   const tests = loadTests('.')
+  // Setting the bar on a check that already exists. `init` scaffolds its three
+  // starter checks WITHOUT thresholds (it must not invent an engineering
+  // number), and --define refuses to touch an existing id — which together
+  // left a new team unable to ever set a bar through the documented path, so
+  // every number they recorded stayed UNKNOWN forever. A threshold is a human
+  // engineering decision; the product's job is to record it with an author,
+  // not to withhold the ability to make it.
+  //
+  // Safe to allow retroactively because a result freezes its verdict AND the
+  // threshold that produced it at record time (results.js), so re-barring a
+  // check never re-grades history.
+  if (args.includes('--threshold')) {
+    const id = opt('id') ?? die('--threshold needs --id <id>')
+    const existing = tests.find((t) => t.id === id)
+    if (!existing) die(`No test "${id}". Define it first:\n  physync tests --define --id ${id} --kind validation --label "…" --by <you>`)
+    const by = opt('by') ?? die('--threshold needs --by <human> — a threshold is an engineering decision, and decisions have authors.')
+    if (opt('min') == null && opt('max') == null) die('--threshold needs --min and/or --max (the bar a measurement must clear).')
+    const before = existing.threshold
+    const threshold = {}
+    if (opt('min') != null) threshold.min = num('min')
+    if (opt('max') != null) threshold.max = num('max')
+    // The invariant "a threshold names an author" is preserved, not weakened.
+    // `init` scaffolds checks with no author (it only wrote a label), so the
+    // person setting the bar takes authorship of the check as well — while
+    // thresholdBy always records who set THIS bar, even on a check someone
+    // else defined.
+    const updated = {
+      ...existing,
+      threshold,
+      definedBy: existing.definedBy ?? by,
+      thresholdBy: by,
+      thresholdAt: new Date().toISOString(),
+    }
+    validateTestDef(updated)
+    saveTests(tests.map((t) => (t.id === id ? updated : t)))
+    const show = (t) => (t ? `${t.min != null ? '≥' + t.min : ''}${t.min != null && t.max != null ? ' and ' : ''}${t.max != null ? '≤' + t.max : ''}` : 'none')
+    console.log(`Threshold for test:${id} — ${show(before)} → ${show(threshold)}  (set by ${by})`)
+    if (before) console.log('  The previous bar was replaced. Results already recorded keep the verdict they were given under the old bar — history is not re-graded.')
+    console.log(`  From now on, a value clearing this bar records PASS instead of UNKNOWN.`)
+    process.exit(0)
+  }
   if (args.includes('--define')) {
     const id = opt('id') ?? die('--define needs --id <id>')
-    if (tests.some((t) => t.id === id)) die(`Test "${id}" is already defined.`)
+    if (tests.some((t) => t.id === id)) {
+      die(`Test "${id}" is already defined.\nTo set or change its threshold (which is what you probably want):\n  physync tests --threshold --id ${id} --min <n> --by <yourName>`)
+    }
     const def = {
       id, kind: opt('kind') ?? 'validation', label: opt('label') ?? die('--define needs --label <text>'),
       definedBy: opt('by') ?? die('--define needs --by <human> — test definitions are engineering decisions with authors.'),
@@ -1373,8 +1434,8 @@ if (cmd === 'tests') {
     }
     if (opt('min') != null || opt('max') != null) {
       def.threshold = {}
-      if (opt('min') != null) def.threshold.min = Number(opt('min'))
-      if (opt('max') != null) def.threshold.max = Number(opt('max'))
+      if (opt('min') != null) def.threshold.min = num('min')
+      if (opt('max') != null) def.threshold.max = num('max')
     }
     validateTestDef(def)
     saveTests([...tests, def])
@@ -1395,8 +1456,7 @@ if (cmd === 'result') {
   const def = loadTests('.').find((t) => t.id === testId) ?? null
   if (!def) console.error(`⚠ test "${testId}" has no definition — recording anyway (kind defaults to validation, no threshold: verdict is explicit-or-UNKNOWN). Define it: physync tests --define --id ${testId} …`)
   const explicit = args.includes('--pass') ? 'PASS' : args.includes('--fail') ? 'FAIL' : args.includes('--unknown') ? 'UNKNOWN' : null
-  const value = opt('value') != null ? Number(opt('value')) : null
-  if (opt('value') != null && Number.isNaN(value)) die('--value must be a number')
+  const value = num('value')   // refuses '' and whitespace, which Number() turns into 0
   const entry = appendResult({
     testId, def, value, explicit,
     evidence: opt('evidence') ? [opt('evidence')] : [],

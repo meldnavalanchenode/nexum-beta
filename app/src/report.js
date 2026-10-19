@@ -37,6 +37,17 @@ export function renderTerminal(findings, context) {
     'GATE FAIL': `${C.red}${C.bold}  ██ NEXUM GATE: NOT THE ROBOT YOU APPROVED ██${C.reset}`,
   }
   lines.push(banner[v])
+  // A Blocks-only team gets a PASS that cannot mean what it looks like. Blocks
+  // findings are capped at WARN by design — the identifier convention is
+  // verified against real files, not SDK source — so reconciliation can never
+  // produce a FAIL for them. Saying that only in the manual leaves a team
+  // reading a green banner as "my robot is fine", when the honest reading is
+  // "this half of the tool never got a vote."
+  if (context.blkCount > 0 && context.filesScanned === 0 && (v === 'PASS' || v === 'NO DRIFT')) {
+    lines.push(`${C.yellow}  NOTE: Blocks-only project. Reconciliation findings are capped at WARN,${C.reset}`)
+    lines.push(`${C.yellow}  so this check can never FAIL — read it as advisory, not as a pass.${C.reset}`)
+    lines.push(`${C.dim}  (The revalidation half of Nexum is unaffected and works normally.)${C.reset}`)
+  }
   if (context.mode === 'gate') {
     lines.push(`${C.dim}  approved ${context.approvedAt}${context.hubsVerified ? '' : ' · declaration layer only (no robot report at approval)'} · engine v${ENGINE_VERSION}${C.reset}`)
   } else if (context.mode === 'sensors') {

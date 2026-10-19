@@ -5,7 +5,19 @@
 // entities are decoded, duplicate attributes are surfaced, and anything
 // unrecognized lands in model.unparsed — never dropped.
 
-const TAG = /<(\/?)([A-Za-z][\w.-]*)((?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g
+// Deliberately PERMISSIVE: it matches any `<tag …>`, including one whose
+// attributes are not well-formed. The previous pattern required every
+// attribute to be quoted, so a single missing quote meant the tag never
+// matched at ALL — the device did not land in `unparsed`, it was never seen.
+// `<Motor name="arm_motor" port=0 />` vanished from the model entirely, taking
+// its port collision with it, and the config reported PASS / "Go drive".
+// Recognising the tag first and judging its attributes second is what makes
+// the module header's promise — "anything unrecognized lands in model.unparsed
+// — never dropped" — actually true.
+const TAG = /<(\/?)([A-Za-z][\w.-]*)((?:[^<>"']|"[^"]*"|'[^']*')*?)\s*(\/?)>/g
+// An attribute whose value is NOT quoted. XML requires quoting; the FTC app
+// always writes it, so this means the file was hand-edited or truncated.
+const BAD_ATTR = /(^|\s)([\w:-]+)\s*=\s*(?!["'])(\S*)/g
 const ATTR = /([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
 
 import { sanitizeLine } from './text.js'
@@ -73,6 +85,16 @@ export function parseConfigXml(xml) {
       attrs[key] = value
     }
     const at = lineOf(m.index)
+    // An unquoted attribute value means this tag is not well-formed XML. Parse
+    // what we can, but say so loudly and REFUSE to treat the tag as a clean
+    // device: a port we could not read is a port we cannot check for
+    // collisions, and silently keeping the device would assert more than we
+    // know.
+    const malformed = [...rawAttrs.matchAll(BAD_ATTR)].map((b) => b[2]).filter(Boolean)
+    if (malformed.length) {
+      model.unparsed.push({ line: at, droppedDevice: true, text: `<${tag}${rawAttrs}> — attribute(s) ${malformed.join(', ')} are not quoted, so this device was NOT added to the model and its ports were never checked for collisions. Fix the quoting in the config, or re-save the configuration on the Robot Controller.` })
+      continue
+    }
     if (duplicated.length) {
       model.unparsed.push({ line: at, text: `<${tag}> has duplicate attribute(s) ${duplicated.join(', ')} — not well-formed XML; last value used` })
     }

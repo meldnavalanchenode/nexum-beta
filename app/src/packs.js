@@ -56,6 +56,20 @@ export const RULE_PACKS = {
       // ── the things everyone forgets
       { from: 'battery-swap', to: 'test:autonomous-run', note: 'an autonomous routine tuned on a full battery can behave differently on a different one — PROPOSED because how much this matters depends entirely on whether your routine is time-based or sensor-based, and only your team knows that' },
       { from: 'robot-weight', to: 'calibration:drive-distance', note: 'added weight changes how far the robot coasts after the motors stop' },
+
+      // ── calibration → test: whatever CONSUMED the calibration
+      // Without these, the five calibrations above are terminal nodes: swapping
+      // a wheel demands a new distance calibration and never once questions the
+      // autonomous run that was tuned against the old one. A calibration is
+      // only ever interesting because something downstream depended on it —
+      // the camera-pose pack chains this way already, and VEX did not.
+      { from: 'calibration:drive-distance', to: 'test:drive-straight', note: 'a straight-drive result measured in inches was measured through this calibration' },
+      { from: 'calibration:drive-distance', to: 'test:autonomous-run', note: 'every drive-to-distance in the routine consumed it' },
+      { from: 'calibration:turn-angle', to: 'test:turn-accuracy', note: 'turn accuracy was measured against the conversion this calibration defines' },
+      { from: 'calibration:turn-angle', to: 'test:autonomous-run', note: 'every turn in the routine consumed it' },
+      { from: 'calibration:inertial-heading', to: 'test:turn-accuracy', note: 'a heading-based turn is only validated as well as the heading calibration behind it' },
+      { from: 'calibration:vision-signature', to: 'test:object-detection', note: 'detection rates were measured with the colour signatures this calibration tuned' },
+      { from: 'calibration:arm-zero', to: 'test:scoring-position', note: 'taught scoring positions are counted from the zero this calibration establishes' },
     ],
   },
 
