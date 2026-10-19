@@ -13,6 +13,13 @@
 *.xml
 !app/samples/*.xml
 TeamCode/
+# ...but NOT the sample robot that ships with Nexum. `demo` reads it, and
+# without this exception the bundled TeamCode was excluded from the published
+# build: the very first command the documentation gives a team died with
+# "Code directory not found". The *.xml rule above already carries the same
+# exception for the same reason.
+!app/samples/TeamCode/
+!app/samples/TeamCode/**
 YourTeamCode/
 physync-robot.json
 physync-stimulus.json
