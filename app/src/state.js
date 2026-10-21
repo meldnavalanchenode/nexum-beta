@@ -23,7 +23,7 @@
 
 import { createHash } from 'node:crypto'
 import { readFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
-import { writeAtomic } from './io.js'
+import { writeAtomic, writeAtomicExclusive } from './io.js'
 import { join, dirname, resolve } from 'node:path'
 import { normalizeFirmware } from './firmware.js'
 import { compareFingerprints } from './fingerprints.js'
@@ -348,7 +348,18 @@ export function saveState(state, dir = '.', { acceptCoverageLoss = false } = {})
   mkdirSync(statesDir, { recursive: true })
   const path = join(statesDir, `V${state.version}.json`)
   if (existsSync(path)) throw new Error(`V${state.version} already exists — verified states are never overwritten. The next version is V${nextVersion(dir)}.`)
-  writeAtomic(path, JSON.stringify(state, null, 2))
+  try {
+    writeAtomicExclusive(path, JSON.stringify(state, null, 2))
+  } catch (e) {
+    if (e?.code === 'EEXIST') {
+      throw Object.assign(new Error(
+        `V${state.version} was created by another run while this one was working — nothing here was saved.\n` +
+        `Two Nexum commands writing the same project at once can each believe they produced V${state.version}, and only one can.\n` +
+        `Run \`states\` to see what is actually on record, then re-run if your change still needs saving.`),
+        { physyncDiagnosed: true })
+    }
+    throw e
+  }
   bumpHighWater(state.version, dir)
   return path
 }

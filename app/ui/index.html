@@ -281,6 +281,26 @@ const reqHint = (r) => {
 }
 
 function renderStatus(d) {
+  // The shadow-mode gate returns no `status` field at all — only
+  // predictionRequired, the changes, and a hint. Falling through to the normal
+  // render printed a literal "██ undefined" banner and dropped the hint, so a
+  // student met broken-looking software at the exact moment the tool was being
+  // most careful with their experiment.
+  if (d.predictionRequired) {
+    const human = (d.changes ?? []).filter((c) => c.source === 'human')
+    const detected = (d.changes ?? []).filter((c) => c.source !== 'human')
+    $('results').innerHTML = `<h2>Deployment evidence status</h2>
+      <div class="banner warn">██ ${esc(String((d.changes ?? []).length))} CHANGE(S) DETECTED — PREDICTION NOT YET RECORDED<sub>vs verified state ${esc(String(d.against ?? ''))}</sub></div>
+      <div class="kv">Nexum is holding its answer back on purpose. Once you have read its list,
+        nobody can know what you would have re-checked on your own — and that comparison is the
+        entire point of the beta. It cannot be recovered for this change.</div>
+      ${detected.length ? `<div class="subhead">What changed (detected)</div>` + detected.map((c) => `<div class="kv">• <b>${esc(c.component)}</b>: ${esc(String(c.previous ?? '(absent)'))} → ${esc(String(c.current ?? '(absent)'))}</div>`).join('') : ''}
+      ${human.length ? `<div class="subhead">Human-reported change</div>` + human.map((c) => `<div class="kv">• <b>${esc(c.component)}</b> — reported by ${esc(String(c.by ?? 'unknown'))}${c.note ? `: &ldquo;${esc(String(c.note))}&rdquo;` : ''}</div>`).join('') : ''}
+      <div class="subhead">To continue</div>
+      <div class="kv"><code>${esc(String(d.hint ?? 'physync predict --checks "a, b" --by <name>'))}</code></div>
+      <div class="kv" style="color:var(--dim)">Not running the experiment? <code>physync status --reveal</code> shows everything now.</div>`
+    return
+  }
   const cls = STATUS_CLASS[d.status] ?? 'info'
   const summary = [
     `${d.changes.filter((c) => c.source !== 'human').length} change(s) detected` + (d.changes.some((c) => c.source === 'human') ? ` · ${d.changes.filter((c) => c.source === 'human').length} human-reported` : ''),

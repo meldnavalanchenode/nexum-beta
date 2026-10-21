@@ -34,7 +34,10 @@ test('`demo` works from a cwd with no samples — the npx reality', () => {
   assert.ok(!/ENOENT|Cannot read config/.test(out), `demo must not depend on cwd:\n${out}`)
   assert.match(out, /NEXUM PREFLIGHT/, 'it ran the real preflight')
   assert.match(out, /MEANT to fail/, 'and tells them the sample failure is expected, not their mistake')
-  assert.match(out, /physync init/, 'and names the next step')
+  // The next-step command echoes however Nexum was invoked, so a ZIP user is
+  // shown `node app/bin/physync.js init` rather than a bare name that is not
+  // on their PATH.
+  assert.match(out, /(node .*physync\.js|physync|nexum) init/, 'and names the next step as a runnable command')
   assert.equal(r.status, 0, 'demo exits 0 — it proves the tool runs; the SAMPLE failing is the point')
 })
 

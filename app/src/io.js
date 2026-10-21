@@ -20,7 +20,7 @@
 // directory as the target so the rename never crosses a filesystem boundary,
 // which is the one condition that would silently turn it back into a copy.
 
-import { writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { writeFileSync, renameSync, unlinkSync, linkSync } from 'node:fs'
 
 /** Write `data` to `path` so that a reader sees either the complete old file
  *  or the complete new one, never a fragment. */
@@ -37,5 +37,28 @@ export function writeAtomic(path, data) {
     try { unlinkSync(tmp) } catch { /* already gone, or never created */ }
     throw e
   }
+  return path
+}
+
+/** Like writeAtomic, but FAILS if the target already exists — even when a
+ *  second process created it a microsecond ago.
+ *
+ *  `existsSync` then `rename` is a check-then-act race: two concurrent
+ *  `state` runs both saw "no V2", both wrote, both renamed, and both printed
+ *  "V2 saved" with exit 0 — while only one V2 survived. A team running two
+ *  terminals lost a verified state and was told it was saved.
+ *
+ *  link(2) is the primitive that closes it: it fails with EEXIST at the
+ *  filesystem level, so exactly one writer can win regardless of timing. */
+export function writeAtomicExclusive(path, data) {
+  const tmp = `${path}.tmp-${process.pid}`
+  try {
+    writeFileSync(tmp, data)
+    linkSync(tmp, path)        // throws EEXIST if another process got there first
+  } catch (e) {
+    try { unlinkSync(tmp) } catch { /* nothing to clean */ }
+    throw e
+  }
+  try { unlinkSync(tmp) } catch { /* the link succeeded; the temp name is spare */ }
   return path
 }

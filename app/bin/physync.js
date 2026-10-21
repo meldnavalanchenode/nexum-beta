@@ -11,8 +11,8 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { parseConfigXml, toSnapshot } from '../src/configXml.js'
 import { scanCodeDir } from '../src/codeScan.js'
-import { reconcile, diffSnapshot, verdict } from '../src/engine.js'
-import { basename, join } from 'node:path'
+import { reconcile, diffSnapshot, verdict, editDistance } from '../src/engine.js'
+import { basename, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderTerminal, renderMarkdown } from '../src/report.js'
 import { ENGINE_VERSION } from '../src/registry.js'
@@ -74,6 +74,22 @@ const num = (name) => {
   }
   return v
 }
+
+
+// HOW THIS PROGRAM WAS INVOKED — echoed back in every command we print.
+//
+// Printed commands all said `physync <cmd>`, but a team that downloaded the
+// ZIP runs `node app/bin/physync.js`. So `init` ended by telling them to run
+// three commands that produce "command not found: physync" — on the first
+// thing anyone does after setup. A command a user cannot run is worse than no
+// command: it reads as the tool being broken on contact.
+const SELF = (() => {
+  const argv1 = process.argv[1] ?? ''
+  const base = basename(argv1)
+  if (base === 'physync' || base === 'nexum') return base    // installed on PATH
+  const rel = relative(process.cwd(), argv1)                 // invoked as `node <path>`
+  return 'node ' + (rel && !rel.startsWith('..') ? rel : argv1)
+})()
 
 const usage = `usage:
   physync demo                                                 ← PROVE IT RUNS (bundled sample robot; it is meant to FAIL)
@@ -414,7 +430,7 @@ if (cmd === 'init') {
   const g2 = loadGraph('.')
   for (const e of g2.custom.filter((e) => e.status === 'proposed')) {
     console.log(`    ${e.from} → ${e.to}`)
-    console.log(`      physync graph --approve ${e.id} --by ${by}`)
+    console.log(`      ${SELF} graph --approve ${e.id} --by ${by}`)
   }
   console.log('\n  THEN, the beta loop (4 commands, in this order):')
   const freeze = declarePath
@@ -442,7 +458,7 @@ if (cmd === 'demo') {
   console.log('  That robot is MEANT to fail — those are real mismatches in a sample,')
   console.log('  not errors in your setup. Seeing them means Nexum works on this machine.\n')
   console.log('  Next: set up your own robot —')
-  console.log('    physync init --config <yourconfig.xml> --code <YourTeamCode> --by <yourName>\n')
+  console.log(`    ${SELF} init --config <yourconfig.xml> --code <YourTeamCode> --by <yourName>\n`)
   process.exit(0)
 }
 
@@ -916,12 +932,32 @@ if (cmd === 'predict') {
   // vocabulary it is matched against — otherwise "camera calibration" vs
   // "camera-pose" reads as a disagreement that never happened.
   const known = (() => { try { return loadTests('.').map((t) => t.id) } catch { return [] } })()
+  // A MISSPELLED check silently corrupts the one measurement this beta exists
+  // for. The debrief compares the predicted set against Nexum's by exact
+  // match, so "localizaton" reads as a check the team named and Nexum missed,
+  // AND as a check Nexum added that they never thought of — one typo, two
+  // false findings, in the direction that flatters the tool.
+  const VOCAB = [...known, 'check', 'preflight', 'stimulus']
+  const unknown = rec.prediction.checks.filter((c) => !VOCAB.includes(c))
+  if (unknown.length && VOCAB.length) {
+    console.log('')
+    for (const u of unknown) {
+      const near = VOCAB.map((k) => [k, editDistance(u.toLowerCase(), k.toLowerCase())])
+        .filter(([, d]) => d > 0 && d <= Math.max(2, Math.floor(u.length / 4)))
+        .sort((a, b) => a[1] - b[1])[0]
+      console.log(near
+        ? `  ⚠ "${u}" is not a check Nexum knows — did you mean "${near[0]}"?`
+        : `  ⚠ "${u}" is not a check Nexum knows.`)
+    }
+    console.log('    A name that does not match is scored as a disagreement that never happened.')
+    console.log(`    To fix it, re-run predict with the right name (it replaces this one until status reveals the answer).`)
+  }
   if (known.length) {
     console.log(`\n  Name checks the way Nexum does, so the comparison lines up. Yours are:`)
     console.log(`    ${known.join(' · ')}`)
-    console.log('    (plus: check · preflight · stimulus — see them in `physync tests`)')
+    console.log(`    (plus: check · preflight · stimulus — see them in \`${SELF} tests\`)`)
   }
-  console.log('\n  Next: run physync status — then do the work — then physync debrief.\n')
+  console.log(`\n  Next: run ${SELF} status — then do the work — then ${SELF} debrief.\n`)
   process.exit(0)
 }
 
@@ -948,7 +984,7 @@ if (cmd === 'debrief') {
   console.log('    MISSED      Something went wrong later that traced back to this change,')
   console.log('                and Nexum never named it.')
   console.log('    AMBIGUOUS   Anything else. This is a real answer — use it freely.')
-  console.log('    physync verdict --verdict HELPED|"NO VALUE"|"EXTRA WORK"|MISSED|AMBIGUOUS --basis "<why, one sentence>" --by <you>')
+  console.log(`    ${SELF} verdict --verdict HELPED|"NO VALUE"|"EXTRA WORK"|MISSED|AMBIGUOUS --basis "<why, one sentence>" --by <you>`)
   console.log('  Then close the loop: perform owed checks, record results, physync state …\n')
   process.exit(0)
 }
@@ -1037,7 +1073,7 @@ if (cmd === 'status') {
   reuseRememberedInputs()
   migrateLegacy('.', { engineVersion: ENGINE_VERSION })
   const base = latestState('.')
-  if (!base) die('No verified state on record — save one first: physync state --config <xml> --code <dir> [--robot r.json]\n  (hand-declared robots: physync state --declare <inventory.json>)')
+  if (!base) die(`No verified state on record — save one first:\n    ${SELF} state --config <xml> --code <dir> [--robot r.json]\n  (hand-declared robots: ${SELF} state --declare <inventory.json>)`)
 
   const declarePath = opt('declare')
   let inventory = null
@@ -1171,12 +1207,12 @@ if (cmd === 'status') {
     console.log('  approves them. None are approved here, so nothing propagates.\n')
     if (proposed.length) {
       console.log(`  ${proposed.length} rule(s) are waiting on that decision — list them with:`)
-      console.log('    physync graph --json')
+      console.log(`    ${SELF} graph --json`)
       console.log('  then activate any you agree with:')
-      console.log(`    physync graph --approve ${proposed[0].id} --by <yourName>\n`)
+      console.log(`    ${SELF} graph --approve ${proposed[0].id} --by <yourName>\n`)
     } else {
       console.log('  No candidate rules are loaded. To load a starting set:')
-      console.log('    physync rules --pack camera-pose --by <yourName>\n')
+      console.log(`    ${SELF} rules --pack camera-pose --by <yourName>\n`)
     }
     console.log('  This is an honest "I do not know" — not a clean bill of health.\n')
   }
@@ -1315,7 +1351,7 @@ if (cmd === 'rules') {
   console.log('  your robot: "if this changed, would that need redoing?" Approve the ones that')
   console.log('  are true of YOUR robot and leave the rest proposed — an unapproved edge is')
   console.log('  never traversed, so leaving it costs nothing.\n')
-  console.log(`    physync graph --approve ${fresh[0]?.id ?? '<edgeId>'} --by <yourName>\n`)
+  console.log(`    ${SELF} graph --approve ${fresh[0]?.id ?? '<edgeId>'} --by <yourName>\n`)
   process.exit(0)
 }
 
@@ -1354,7 +1390,7 @@ if (cmd === 'graph') {
         console.log('    configuration · software · device:<name> · hub:<addr> · firmware:<addr> · sensor:<name> · fingerprint:<id>')
         console.log(`    "${edge.from}" is none of those, so this edge only activates when a person reports`)
         console.log(`    a change with exactly that component name:`)
-        console.log(`      physync change --component ${edge.from} --note "<what happened>" --by <name>`)
+        console.log(`      ${SELF} change --component ${edge.from} --note "<what happened>" --by <name>`)
         console.log(`    If you meant the configured device "${edge.from}", the node id is  device:${edge.from}`)
       }
     }

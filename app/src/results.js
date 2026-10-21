@@ -114,6 +114,20 @@ export function appendResult({ testId, def, value, explicit, evidence = [], reco
     recordedAt: now ?? new Date().toISOString(),
   }
   mkdirSync(join(dir, '.physync/results'), { recursive: true })
+  // Validate the ledger BEFORE appending. A torn final line (a write cut short
+  // by a laptop sleeping) does not stop an append — so `result` printed
+  // "Recorded: … PASS" and exited 0, while every later read of that ledger
+  // threw. A team was told their evidence was saved and it was unreadable,
+  // which is the one way to lose a result that nobody notices.
+  try {
+    loadResults(dir)
+  } catch (e) {
+    throw Object.assign(new Error(
+      `Refusing to record: the results ledger cannot be read back (${e.message}).\n` +
+      `Appending to it would tell you the result was saved while leaving the file unusable.\n` +
+      `Open ${LEDGER_FILE} — it is one JSON object per line. The damage is almost always the LAST line, cut short by a write that did not finish. Delete that line and re-run this command.`),
+      { physyncDiagnosed: true })
+  }
   appendFileSync(join(dir, LEDGER_FILE), JSON.stringify(entry) + '\n')
   return entry
 }

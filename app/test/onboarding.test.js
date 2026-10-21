@@ -105,7 +105,11 @@ test('the full beta loop closes: predict → status → results → debrief → 
   // human) but must never ASSIGN one. The record is the proof, not the prose.
   const expId = readFileSync(join(dir, '.physync/experiments/exp-1.json'), 'utf8')
   assert.equal(JSON.parse(expId).debrief.verdict, null, 'the debrief records facts and assigns NO verdict')
-  assert.match(d.out, /physync verdict/, 'and it asks the human to make that call')
+  // The printed command echoes however the user invoked Nexum — a ZIP user
+  // runs `node app/bin/physync.js`, and printing `physync verdict` told them
+  // to run something that does not exist on their PATH.
+  assert.match(d.out, /\bverdict\b/, 'and it asks the human to make that call')
+  assert.match(d.out, /(node .*physync\.js|physync|nexum) verdict/, 'with a command they can actually run')
 
   assert.equal(run(dir, ['state', '--config', 'yourconfig.xml', '--code', 'code']).code, 0)
   assert.ok(existsSync(join(dir, '.physync/states/V2.json')))
