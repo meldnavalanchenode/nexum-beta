@@ -24,6 +24,7 @@ import { buildVerifiedState, saveState, listStates, latestState, nextVersion, mi
 import { loadGraph, saveGraph, validateEdge, effectiveEdges } from '../src/graph.js'
 import { assertNotNestedProject } from '../src/state.js'
 import { assess, foldResults } from '../src/assess.js'
+import { assertTrialActive, startTrial, trialNotice } from '../src/trial.js'
 import { plan, APPLICABILITY } from '../src/planner.js'
 import { loadReported, recordReported } from '../src/reported.js'
 import { predict, debrief, assignVerdict, closeExperiment, listExperiments } from '../src/experiment.js'
@@ -249,6 +250,27 @@ const gitStateOf = (dir) => {
     return { sha, dirty }
   } catch { return null }
 }
+// THE 30-DAY BETA WINDOW. Checked before any command does work, so an expired
+// project cannot half-run. `demo` is exempt: it reads a bundled sample, writes
+// nothing, and is the one command a team runs to find out whether Nexum works
+// on their machine at all — refusing that teaches them nothing.
+if (cmd && cmd !== 'demo' && cmd !== 'help' && !args.includes('--help')) {
+  try { assertTrialActive('.') } catch (e) { console.error(`\n  ${e.message}\n`); process.exit(1) }
+  // The countdown prints on every command a human runs, because a notice shown
+  // only at `init` would stop being true a month later — exactly when it
+  // matters. Two exclusions:
+  //   init    prints its own copy inside the onboarding text it already shows
+  //   --json  is machine mode: no human chrome on either stream. Three suites
+  //           parse stdout+stderr together, and a team piping `2>&1` into jq
+  //           would have hit the same thing. A courtesy that breaks a script is
+  //           not a courtesy; the window is in the docs, in trial.json, and on
+  //           every interactive run.
+  if (cmd !== 'init' && !args.includes('--json')) {
+    const notice = trialNotice('.')
+    if (notice) console.error(notice)
+  }
+}
+
 // A misspelled flag is silently ignored by every naive CLI, which is how a user
 // ends up believing they recorded a baseline they did not.
 for (const a of args.slice(1)) {
@@ -378,6 +400,7 @@ if (cmd === 'init') {
 
   assertNotNestedProject('.')
   mkdirSync('.physync', { recursive: true })
+  startTrial('.')
   // Opt-in marker: this project is running the shadow-mode experiment, so
   // status will hold its answer until a prediction is on record.
   writeFileSync('.physync/beta.json', JSON.stringify({ experiment: 'shadow-mode', by, at: new Date().toISOString() }, null, 2))
@@ -440,7 +463,10 @@ if (cmd === 'init') {
   console.log('    2. physync predict --checks "a, b" --by <name>   ← BEFORE a change: what YOU would re-check')
   console.log('    3. physync status                                ← AFTER the change: what Nexum says')
   console.log('    4. physync debrief --checked "a, b" --by <name>  ← what you actually did')
-  console.log('\n  Step 2 matters most: it must happen BEFORE step 3, or the comparison is lost.\n')
+  console.log('\n  Step 2 matters most: it must happen BEFORE step 3, or the comparison is lost.')
+  const notice = trialNotice('.')
+  if (notice) console.log(`\n${notice}  Your records stay yours either way — .physync/ is plain JSON.\n`)
+  else console.log('')
   process.exit(0)
 }
 

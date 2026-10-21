@@ -20,6 +20,15 @@ is the most valuable result you can give us — that is the point of the test.
 
 ---
 
+**Beta window:** Nexum runs for **30 days** from your first `init`, then stops
+and asks you to get in touch. Every command prints the days remaining (except
+`--json` runs, which stay machine-clean). Your records
+are plain JSON in `.physync/` and stay readable either way — the deadline stops
+the tool, not your data. The clock is stored in `.physync/trial.json` and in
+`~/.nexum/trial.json`; the latter is the only file Nexum writes outside your
+project, holds one timestamp and nothing else, and exists so the window is one
+30-day run per download rather than one per folder.
+
 ## 1 · Get it and prove it runs (60 seconds)
 
 Install [Node.js](https://nodejs.org) **20 or newer** (`node --version` to
@@ -150,7 +159,9 @@ evidence stays **UNKNOWN** — it never becomes PASS.
 ## Privacy — what leaves your machine
 
 **Nothing.** The whole loop above is offline; there is no account, no
-telemetry, no upload. Everything lives in a `.physync/` folder in your project.
+telemetry, no upload. Everything Nexum records lives in a `.physync/` folder in
+your project; the only file outside it is the beta clock's single timestamp at
+`~/.nexum/trial.json`.
 (One optional command, `explain`, calls an AI API — it only runs if *you* set
 an API key, and it never affects any verdict. Don't use it for the beta.)
 
@@ -161,10 +172,12 @@ and rules — **not your source code**. Look inside first; it's plain JSON.
 
 - **It crashed or said something confusing** — send us the command you ran and
   everything it printed. That's a finding, not your fault.
-- **Start over** — delete the `.physync` folder. Nothing else on your machine
-  is touched, and your robot is never touched at all.
-- **Nothing is destructive** — Nexum only writes inside `.physync/`, never
-  edits your config or code, and never overwrites a saved state.
+- **Start over** — delete the `.physync` folder. Your robot is never touched at
+  all. `~/.nexum/trial.json` stays, so starting over is a clean slate rather
+  than a new 30 days.
+- **Nothing is destructive** — Nexum writes inside `.physync/` and the one
+  timestamp at `~/.nexum/trial.json`, never edits your config or code, and
+  never overwrites a saved state.
 
 ## Known limitations (so you're not surprised)
 

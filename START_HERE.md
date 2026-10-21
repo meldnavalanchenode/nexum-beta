@@ -40,6 +40,30 @@ to re-check things you know don't matter, that's the finding.
 
 ---
 
+## Before you start: this beta runs for 30 days
+
+From the first time you run `init`, Nexum works for **30 days**. After that
+every command stops and asks you to email me. Every command you run prints how
+many days are left, from day one, so it should never surprise you. (The one
+exception: `--json` runs stay silent, so the notice can't break a script.)
+
+**Your records are never held hostage.** Everything Nexum writes lives in a
+`.physync/` folder in your project as plain JSON — verified states, results,
+rules, the lot. You can open any of it in a text editor, before or after the
+window, forever. The deadline stops Nexum from running; it does not touch your
+data.
+
+The clock is kept in two plain-text files: `.physync/trial.json` in your
+project, and `~/.nexum/trial.json` in your home folder. **That second file is
+the only thing Nexum ever writes outside your project** — it holds one
+timestamp and nothing else, no machine name, no user name, no project path. It
+lives there so the window is one 30-day run per download rather than one per
+folder: deleting `.physync/` or unzipping a fresh copy won't restart it. You
+can read it, and if you delete it the project copy still governs.
+
+If you hit the end and still want it, email **ashrith.kora@gmail.com** and say
+you're a beta team. I'll extend it.
+
 ## 1 · Get it running (60 seconds)
 
 You need [Node.js](https://nodejs.org) **20 or newer**. Check with:
@@ -239,8 +263,9 @@ honest answer, and often the right one.
 
 **Nexum crashed.**
 Send me the command you ran and everything it printed. **That's a finding, not
-your fault**, and it's exactly what I need. Nothing is damaged — Nexum only ever
-writes inside the `.physync/` folder.
+your fault**, and it's exactly what I need. Nothing is damaged — Nexum writes
+inside the `.physync/` folder, plus the one timestamp file at
+`~/.nexum/trial.json` described above. Nothing else on your machine.
 
 **My robot state is incomplete — I don't have all the test results.**
 Fine, and expected. Nexum reports what's missing as UNKNOWN rather than
@@ -248,15 +273,18 @@ pretending. You don't need full coverage for this beta; you need one real change
 run honestly.
 
 **I want to start over.**
-Delete the `.physync/` folder. Nothing else on your machine is touched, and your
-config and code are never modified.
+Delete the `.physync/` folder. Your config and code are never modified. The only
+thing left behind is `~/.nexum/trial.json`, which keeps the beta clock honest —
+starting over gives you a clean slate, not a new 30 days.
 
 ---
 
 ## Privacy — what leaves your machine
 
 **Nothing.** The whole loop is offline: no account, no telemetry, no upload.
-Everything lives in a `.physync/` folder in your project.
+Everything Nexum records lives in a `.physync/` folder in your project. The one
+file outside it, `~/.nexum/trial.json`, is a single timestamp for the beta
+clock — nothing is sent anywhere, because there is nowhere for it to be sent.
 
 If you choose to send me anything, send the `.physync` folder — it holds states,
 results, and rules, **not your source code**. Open it first if you want; it's

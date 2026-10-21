@@ -24,7 +24,7 @@ const APP = fileURLToPath(new URL('..', import.meta.url))
 const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.json'), 'utf8'))
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'physync-cli-'))
@@ -47,8 +47,10 @@ test('--flag=value is honoured, not silently discarded', () => {
 test('the two flag forms give identical answers', () => {
   const a = run(project(), ['status', '--config', 'wrong.xml', '--code', 'code', '--json', '--reveal'])
   const b = run(project(), ['status', '--config=wrong.xml', '--code=code', '--json', '--reveal'])
+  // stdout ONLY: --json's payload is stdout, and human-facing lines (the beta
+  // countdown among them) go to stderr precisely so this stays parseable.
   const strip = (s) => JSON.parse(s.replace(/^[^{]*/, ''))
-  const ja = strip(a.out), jb = strip(b.out)
+  const ja = strip(a.stdout), jb = strip(b.stdout)
   assert.equal(ja.status, jb.status, 'space form and = form must agree on the verdict')
   assert.equal(ja.changes.length, jb.changes.length, 'and on what changed')
 })

@@ -23,6 +23,7 @@ import { assess, foldResults } from './assess.js'
 import { recordReported } from './reported.js'
 import { loadTests, loadResults, detectRegressions, appendResult } from './results.js'
 import { loadFingerprintDefs } from './fingerprints.js'
+import { assertTrialActive, trialNotice } from './trial.js'
 
 const PORT = Number(process.env.PHYSYNC_PORT ?? 4620)
 const UI = new URL('../ui/index.html', import.meta.url)
@@ -151,6 +152,16 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && path === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
       return res.end(readFileSync(UI, 'utf8'))
+    }
+    // THE 30-DAY BETA WINDOW, enforced here too. The CLI gate is not enough:
+    // this server writes to the same .physync/ the CLI does, so `npm run ui`
+    // would have been a way around a stop we told teams was absolute. Checked
+    // per request, not just at startup, because a server left running must not
+    // keep working across the boundary. `/` and `/sample` stay open — one is
+    // the page that has to render to explain the refusal, the other reads a
+    // bundled sample and writes nothing, the same reason `demo` is exempt.
+    if (path !== '/sample') {
+      try { assertTrialActive('.') } catch (e) { return json(res, 403, { error: e.message }) }
     }
     if (req.method === 'GET' && path === '/sample') {
       const configXml = readFileSync(join(SAMPLES, 'config.xml'), 'utf8')
@@ -465,6 +476,17 @@ const server = createServer(async (req, res) => {
     json(res, 400, { error: 'Could not process that input.' })
   }
 })
+
+// Refuse to start at all past the window, so a team gets the message once and
+// clearly rather than a UI that loads and then 403s on every action.
+try {
+  assertTrialActive('.')
+} catch (e) {
+  console.error(`\n  ${e.message}\n`)
+  process.exit(1)
+}
+const uiNotice = trialNotice('.')
+if (uiNotice) console.error(uiNotice)
 
 server.listen(PORT, '127.0.0.1', () => {
   // Report the port actually BOUND, not the one requested. PHYSYNC_PORT=0 asks

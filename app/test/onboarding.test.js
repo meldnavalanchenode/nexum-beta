@@ -19,7 +19,7 @@ const APP = fileURLToPath(new URL('..', import.meta.url))
 const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.json'), 'utf8'))
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 function freshRobot() {
   const dir = mkdtempSync(join(tmpdir(), 'physync-onb-'))
@@ -76,7 +76,7 @@ test('THE DOCUMENTED PATH produces real rechecks — the P0 this fixes', () => {
   // (--reveal because THIS test is about plan content, not the experiment
   // ordering — the gate that would otherwise withhold it has its own test.)
   for (const id of ['camera-pose:01', 'camera-pose:02']) run(dir, ['graph', '--approve', id, '--by', 'Faraday'])
-  const j = JSON.parse(run(dir, ['status', '--json', '--reveal']).out.replace(/^[^{]*/, ''))
+  const j = JSON.parse(run(dir, ['status', '--json', '--reveal']).stdout.replace(/^[^{]*/, ''))
   const actions = j.revalidation.required.map((r) => r.action)
   assert.ok(actions.includes('calibration:camera-pose'), `expected the calibration recheck, got ${actions.join(', ')}`)
   assert.ok(actions.includes('test:localization'), 'and the test that depends on it')
@@ -152,7 +152,7 @@ test('status withholds its ANSWER until a prediction is on record — but still 
   assert.match(gated.out, /camera-position/, 'what CHANGED is still shown — it contaminates nothing')
   assert.ok(!/REVALIDATE|REQUIRED REVALIDATION/.test(gated.out), 'but the answer is withheld')
 
-  const j = JSON.parse(run(dir, ['status', '--json']).out.replace(/^[^{]*/, ''))
+  const j = JSON.parse(run(dir, ['status', '--json']).stdout.replace(/^[^{]*/, ''))
   assert.equal(j.predictionRequired, true, 'machine consumers get the gate as a fact')
   assert.ok(!j.revalidation, 'and no plan leaks through --json either')
 
