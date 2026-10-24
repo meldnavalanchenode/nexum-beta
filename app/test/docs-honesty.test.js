@@ -29,7 +29,7 @@ const usageText = (usage.stdout ?? '') + (usage.stderr ?? '')
 function commandsIn(doc) {
   const text = readFileSync(join(ROOT, doc), 'utf8')
   const found = new Set()
-  for (const block of text.matchAll(/```bash\n([\s\S]*?)```/g)) {
+  for (const block of text.matchAll(/```bash\r?\n([\s\S]*?)```/g)) {
     for (const line of block[1].split('\n')) {
       // Both documented invocation forms: `npx nexum-beta <cmd>` (START_HERE)
       // and `node app/bin/physync.js <cmd>` (README / offline fallback).
@@ -69,7 +69,7 @@ test('every flag the docs pass is accepted by the command it is passed to', () =
   const offenders = []
   for (const doc of DOCS) {
     const text = readFileSync(join(ROOT, doc), 'utf8')
-    for (const block of text.matchAll(/```bash\n([\s\S]*?)```/g)) {
+    for (const block of text.matchAll(/```bash\r?\n([\s\S]*?)```/g)) {
       for (const line of block[1].split('\n')) {
         const m = line.match(/(?:npx\s+nexum(?:-beta)?|physync\.js)\s+([a-z-]+)\s+(.*)$/)
         if (!m) continue
@@ -101,7 +101,7 @@ test('START_HERE depends on nothing unpublished — ZIP + node only', () => {
   // No command block may invoke npx/npm — that would reintroduce the registry
   // dependency this doc exists to avoid.
   const bad = []
-  for (const block of text.matchAll(/```bash\n([\s\S]*?)```/g)) {
+  for (const block of text.matchAll(/```bash\r?\n([\s\S]*?)```/g)) {
     for (const line of block[1].split('\n')) {
       if (/^\s*(npx|npm)\s/.test(line)) bad.push(line.trim())
     }

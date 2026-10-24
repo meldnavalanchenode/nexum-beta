@@ -1,0 +1,7 @@
+# Shipped with the artifact deliberately. Git on Windows checks out CRLF by
+# default, and the public CI run on 24 Oct 2026 failed both Windows legs because
+# of it: the docs-honesty regexes match ```bash\n, a CRLF checkout makes that
+# ```bash\r\n, zero command blocks were found, and the test then failed on the
+# emptiness check. The engine itself is CRLF-safe (verified), so this is about
+# the repo being consistent for anyone who clones it on Windows.
+* text=auto eol=lf
