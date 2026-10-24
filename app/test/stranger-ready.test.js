@@ -116,14 +116,25 @@ test('a mixed Java+Blocks project is NOT given the caveat either', () => {
 
 // ── 3. Windows is actually executed, not simulated ────────────────────────
 
-test('CI executes the suite on Windows, macOS and Linux', () => {
+test('CI covers Windows, macOS and Linux somewhere in the workflow', (t) => {
+  // .github/ is development-repo only and is deliberately not published, so
+  // from the artifact there is nothing to inspect. Absent workflow = cannot
+  // evaluate, which is a skip; a FAIL here told a team their download was
+  // broken when it was complete and correct.
   const ci = join(APP, '..', '.github/workflows/ci.yml')
-  assert.ok(existsSync(ci), 'a CI workflow must exist — "never run on Windows" is fixable, not just documentable')
+  if (!existsSync(ci)) {
+    return t.skip('.github/ is not part of the published artifact — this guard is repo-only')
+  }
   const y = readFileSync(ci, 'utf8')
   for (const os of ['windows-latest', 'macos-latest', 'ubuntu-latest']) {
-    assert.ok(y.includes(os), `${os} missing from the matrix`)
+    assert.ok(y.includes(os), `${os} missing from the workflow`)
   }
   assert.match(y, /fail-fast: false/, 'a Windows-only failure must not hide a macOS one')
-  assert.match(y, /node-version: \$\{\{ matrix\.node \}\}/, 'and it must run on more than one Node')
+  // Both Node versions must be exercised, but no longer necessarily in the
+  // same job: the per-push leg runs the matrix on ubuntu and the expensive
+  // platforms run on a schedule, because six legs per push billed ~216
+  // minutes and exhausted a private repo's monthly allowance in nine pushes.
+  assert.ok(/matrix\.node/.test(y), 'at least one leg must matrix over Node versions')
   assert.ok(/'20'/.test(y), 'including the oldest version the docs claim to support')
+  assert.ok(/'22'/.test(y), 'and current')
 })

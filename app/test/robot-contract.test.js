@@ -16,13 +16,22 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseRobotReport, analyzeSensors } from '../src/sensors.js'
 
 const APP = fileURLToPath(new URL('..', import.meta.url))
-const JAVA = readFileSync(join(APP, 'robot/PhysyncPreflight.java'), 'utf8')
+
+// app/robot/*.java is DEVELOPMENT-REPO ONLY: the published artifact ships the
+// laptop half and no Java, so there is no contract to check from there. This
+// used to be read at module scope, which threw on import and failed the whole
+// file rather than reporting a missing input — the worst shape for a test,
+// because the output said "test failed" with nothing to act on.
+const JAVA_PATH = join(APP, 'robot/PhysyncPreflight.java')
+const HAS_JAVA = existsSync(JAVA_PATH)
+const SKIP = HAS_JAVA ? false : 'app/robot/ is not part of the published artifact — this contract is repo-only'
+const JAVA = HAS_JAVA ? readFileSync(JAVA_PATH, 'utf8') : ''
 const PARSER = readFileSync(join(APP, 'src/sensors.js'), 'utf8')
 
 const setFrom = (name) => {
@@ -31,7 +40,7 @@ const setFrom = (name) => {
   return new Set([...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]))
 }
 
-test('every read result the OpMode can emit is one the parser accepts', () => {
+test('every read result the OpMode can emit is one the parser accepts', { skip: SKIP }, () => {
   const accepted = setFrom('READS')
   // `new Liveness("<class>", "<result>", …)` — the second argument is the read.
   const emitted = new Set([...JAVA.matchAll(/new Liveness\("[^"]+",\s*"([^"]+)"/g)].map((m) => m[1]))
@@ -41,7 +50,7 @@ test('every read result the OpMode can emit is one the parser accepts', () => {
     `the OpMode emits read result(s) the laptop will refuse: ${rejected.join(', ')} (accepted: ${[...accepted].join(', ')})`)
 })
 
-test('every sensor class the OpMode can emit is one the parser accepts', () => {
+test('every sensor class the OpMode can emit is one the parser accepts', { skip: SKIP }, () => {
   const accepted = setFrom('CLASSES')
   const emitted = new Set([...JAVA.matchAll(/new Liveness\("([^"]+)"/g)].map((m) => m[1]))
   const rejected = [...emitted].filter((c) => !accepted.has(c))
@@ -49,7 +58,7 @@ test('every sensor class the OpMode can emit is one the parser accepts', () => {
     `the OpMode emits sensor class(es) the laptop will refuse: ${rejected.join(', ')} (accepted: ${[...accepted].join(', ')})`)
 })
 
-test('the OpMode emits every field the parser requires', () => {
+test('the OpMode emits every field the parser requires', { skip: SKIP }, () => {
   // The parser throws by name on each of these; a dropped field bricks the
   // report for every team at once.
   for (const field of ['physyncRobot', 'name', 'type', 'class', 'read', 'value', 'livenessDeterminable', 'address']) {
@@ -83,7 +92,7 @@ test('a report built from the Java\'s own format strings parses and judges corre
     'a non-determinable sensor is not a failure — it is absence of evidence')
 })
 
-test('the report path degrades instead of failing to compile', () => {
+test('the report path degrades instead of failing to compile', { skip: SKIP }, () => {
   // A phone Robot Controller on Android 11+ enforces scoped storage and a raw
   // FileWriter("/sdcard/...") throws. The SDK knows the right location, but
   // IMPORTING its class would turn a missing class into a COMPILE error on a
@@ -96,7 +105,7 @@ test('the report path degrades instead of failing to compile', () => {
   assert.match(JAVA, /return "\/sdcard\/FIRST\/physync-robot\.json"/, 'with the documented path as fallback')
 })
 
-test('the driver station never claims a report was saved when it was not', () => {
+test('the driver station never claims a report was saved when it was not', { skip: SKIP }, () => {
   // A team staring at the Driver Station has no other feedback channel. The
   // card used to print the path unconditionally, so a failed write still
   // showed "Report → /sdcard/FIRST/..." and they went looking for a file that
@@ -105,7 +114,7 @@ test('the driver station never claims a report was saved when it was not', () =>
   assert.match(JAVA, /Report NOT saved/, 'and says so plainly when the write failed')
 })
 
-test('every on-robot source is syntactically parseable', () => {
+test('every on-robot source is syntactically parseable', { skip: SKIP }, () => {
   // Not a compile — the FTC SDK is not here. This only catches the class of
   // error that would stop a team's Android Studio build before it even
   // resolves imports. Brace and paren balance is a crude but real check that

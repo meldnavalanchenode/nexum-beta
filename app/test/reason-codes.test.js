@@ -11,7 +11,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { REASON_CODES } from '../src/planner.js'
 
@@ -53,8 +53,14 @@ test('every documented code explains itself in a sentence a student can read', (
 // component, those only change by human report, and PHYSICAL_CHANGE_REPORTED
 // outranks it. That is a documentation hazard, not a bug — the output is
 // correct either way — so the guide must not list it among codes "in use".
-test('the guide does not claim an unreachable code is in use', () => {
-  const guide = readFileSync(fileURLToPath(new URL('../../docs/Nexum-Technical-Guide.md', import.meta.url)), 'utf8')
+test('the guide does not claim an unreachable code is in use', (t) => {
+  // docs/ is development-repo only; the published artifact ships README and
+  // START_HERE and nothing else. Absent guide = nothing to guard, not a fail.
+  const guidePath = fileURLToPath(new URL('../../docs/Nexum-Technical-Guide.md', import.meta.url))
+  if (!existsSync(guidePath)) {
+    return t.skip('docs/ is not part of the published artifact — this guard is repo-only')
+  }
+  const guide = readFileSync(guidePath, 'utf8')
   if (!guide.includes('CALIBRATION_STALE')) return  // nothing to guard
   const idx = guide.indexOf('CALIBRATION_STALE')
   const context = guide.slice(Math.max(0, idx - 1200), idx + 1200)

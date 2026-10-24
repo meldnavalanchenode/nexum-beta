@@ -1,0 +1,100 @@
+# Cross-platform CI for the PUBLIC beta artifact.
+#
+# This file is generated into the published repository by scripts/export-beta.sh.
+# Do not edit it in dist/ — edit dist-ci-template.yml in the development repo,
+# or the next export will overwrite your change.
+#
+# WHY IT LIVES HERE RATHER THAN IN THE PRIVATE REPO. Actions minutes are metered
+# on private repositories (2,000/month on the free plan) and billed by a
+# multiplier — ubuntu 1x, windows 2x, macOS 10x. Six legs of a five-minute
+# suite billed ~216 minutes per push, so roughly nine pushes exhausted October
+# and every run afterwards failed before starting. Public repositories get
+# unlimited free minutes, so the full matrix runs here on every push at no cost.
+#
+# It is also the better place to run it. This repository is exactly what a team
+# downloads, so a green run here is evidence about the artifact itself rather
+# than about a development tree that contains files teams never receive.
+#
+# The generative shards are excluded from the per-push run: they are millions of
+# cases of pure logic that cannot behave differently per operating system, and
+# running them six times per push would prove arithmetic three times over. They
+# run on a schedule instead.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 1'   # Mondays 08:00 UTC — the generative campaign
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: ${{ matrix.os }} · node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false        # a Windows-only failure must not hide a macOS one
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # The engine is zero-dependency by design. Proving it runs with no
+      # node_modules at all is part of what is being tested.
+      - name: Confirm the engine needs no dependencies
+        run: node -e "console.log('node', process.version)"
+
+      - name: Prove it runs at all (bundled sample robot, expected to FAIL)
+        working-directory: app
+        shell: bash
+        run: |
+          set +e
+          node bin/physync.js demo
+          code=$?
+          # `demo` exits 0: the SAMPLE failing is the point, the command
+          # succeeding is what is being tested.
+          if [ $code -ne 0 ]; then echo "demo exited $code, expected 0"; exit 1; fi
+
+      - name: Behavioural suite (generative shards excluded)
+        working-directory: app
+        shell: bash
+        run: |
+          files=$(ls test/*.test.js | grep -v shard | tr '\n' ' ')
+          echo "running $(echo $files | wc -w) test files"
+          node --test --test-concurrency=4 $files
+
+  # Pure logic, multi-hour by construction, and identical on every platform.
+  # Weekly on ubuntu only, split four ways so each leg fits inside a runner.
+  generative:
+    name: generative shards (ubuntu only)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Full suite — leg ${{ matrix.part }} of 4 (files round-robin by index)
+        working-directory: app
+        shell: bash
+        run: |
+          files=$(ls test/*.test.js | awk 'NR % 4 == ${{ matrix.part }}' | tr '\n' ' ')
+          echo "leg ${{ matrix.part }}: $(echo $files | wc -w) test files"
+          node --test --test-concurrency=4 $files
