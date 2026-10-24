@@ -196,7 +196,7 @@ export function compareApproval(approval, observed, checkMeta) {
     findings.push(finding('approval-hubs-not-covered', meta('approval-hubs-not-covered'),
       'This approval was recorded without a robot report — hub census and firmware are NOT covered by the gate',
       [],
-      'Run the PHYSYNC Preflight OpMode, pull physync-robot.json, and approve with --robot to extend the gate to the physical layer.'))
+      'Run the Nexum Preflight OpMode, pull physync-robot.json, and approve with --robot to extend the gate to the physical layer.'))
   } else if (observed.hubs != null) {
     // Fail closed with a NAMED cause on malformed observation — a TypeError
     // deep in a Map constructor is indistinguishable from a tool bug, and a

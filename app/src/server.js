@@ -1,4 +1,4 @@
-// PHYSYNC web UI server — local-first (loopback ONLY), nothing persisted,
+// Nexum web UI server — local-first (loopback ONLY), nothing persisted,
 // nothing leaves the machine. Route layer only; logic stays in the pure
 // modules. Same hardening lessons as our previous audit server: clean 413 on
 // oversized bodies (no socket-reset races), query-string-safe routing,
@@ -25,7 +25,10 @@ import { loadTests, loadResults, detectRegressions, appendResult } from './resul
 import { loadFingerprintDefs } from './fingerprints.js'
 import { assertTrialActive, trialNotice } from './trial.js'
 
-const PORT = Number(process.env.PHYSYNC_PORT ?? 4620)
+// NEXUM_PORT is the name going forward; PHYSYNC_PORT still works because it
+// is an interface someone may already have scripted, and silently breaking
+// it to tidy a name would be the wrong trade.
+const PORT = Number(process.env.NEXUM_PORT ?? process.env.PHYSYNC_PORT ?? 4620)
 const UI = new URL('../ui/index.html', import.meta.url)
 // fileURLToPath, never url.pathname: on Windows .pathname yields "/C:/…",
 // whose leading slash makes every readFileSync built from it fail. School
@@ -195,7 +198,7 @@ const server = createServer(async (req, res) => {
       const rep = parseReport(payload.robotReport)
       if (rep.error) return json(res, 400, { error: rep.error })
       if (rep.hubs != null && rep.hubs.length === 0) {
-        return json(res, 422, { error: 'That robot report contains no hub census — re-run the PHYSYNC Preflight OpMode and pull a fresh physync-robot.json.' })
+        return json(res, 422, { error: 'That robot report contains no hub census — re-run the Nexum Preflight OpMode and pull a fresh physync-robot.json.' })
       }
       if (rep.report) {
         const health = analyzeSensors(rep.report)
@@ -496,5 +499,5 @@ server.listen(PORT, '127.0.0.1', () => {
   // where pid allocation differs from a dev laptop — the loser died with
   // EADDRINUSE and its suite sat until an 8-second timeout.
   const bound = server.address()?.port ?? PORT
-  console.log(`PHYSYNC ui → http://127.0.0.1:${bound} (loopback only; nothing leaves this machine)`)
+  console.log(`Nexum ui → http://127.0.0.1:${bound} (loopback only; nothing leaves this machine)`)
 })

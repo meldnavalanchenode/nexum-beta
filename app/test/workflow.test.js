@@ -35,13 +35,13 @@ function workspace() {
 }
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 const statusWith = (dir, fx) => {
   stage(dir, fx)
   return run(dir, ['status', '--config', 'robot.xml', '--code', 'code', '--robot', 'rob.json', '--json'])
 }
-const parse = (r) => JSON.parse(r.out.slice(r.out.indexOf('{')))
+const parse = (r) => JSON.parse(r.stdout.slice(r.stdout.indexOf('{')))
 
 // ── scenario 1: no change ──────────────────────────────────────────────────
 test('fixtures: baseline against itself is VERIFIED FOR DEFINED CHECKS, exit 0', () => {

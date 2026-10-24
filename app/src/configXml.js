@@ -26,7 +26,7 @@ const decodeEntities = (s) => s
   .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
 
-// REV hub physical port ranges — hand-edited configs (a workflow PHYSYNC
+// REV hub physical port ranges — hand-edited configs (a workflow Nexum
 // itself recommends during swap recovery) can declare impossible ports.
 export const PORT_RANGES = {
   motor: [0, 3], servo: [0, 5], digital: [0, 7], analog: [0, 3], i2c: [0, 3],

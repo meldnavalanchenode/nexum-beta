@@ -1,7 +1,7 @@
-// Stimulus-pass analysis — the behavioral half of PHYSYNC. Pure: report in,
+// Stimulus-pass analysis — the behavioral half of Nexum. Pure: report in,
 // findings out; no I/O, same boundary rule as the config engine.
 //
-// The philosophy carries over exactly. PHYSYNC does not claim to know whether
+// The philosophy carries over exactly. Nexum does not claim to know whether
 // your motor direction is "correct" — only your team's convention decides
 // that. It records the OBSERVED relationship on a verified run, then flags
 // CHANGE. "left_drive moved + before and moves − now" is a fact; "left_drive
@@ -97,7 +97,7 @@ function consistency(report) {
         'stimulus-report-inconsistent',
         `"${m.name}" reports ${m.result} but deltaTicks is ${m.deltaTicks} — the report contradicts itself`,
         [`stimulus report: ${m.name}`],
-        'This report was edited by hand, truncated, or written by a different PHYSYNC version. Re-run the pass rather than trusting either value.',
+        'This report was edited by hand, truncated, or written by a different Nexum version. Re-run the pass rather than trusting either value.',
       ))
     }
   }

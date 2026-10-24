@@ -100,3 +100,35 @@ test('a non-numeric threshold is refused instead of stored as null', () => {
   assert.notEqual(r.code, 0)
   assert.match(r.out, /needs a number/)
 })
+
+// --json IS A MACHINE CONTRACT: stdout carries the payload and nothing else.
+//
+// This was a real defect, found while dumping data shapes for a technical
+// write-up. `reuseRememberedInputs` printed "(using remembered inputs: …)" to
+// STDOUT, so `status --json` with no flags returned something that is not
+// JSON — and no-flags is the most natural way to script Nexum, because recall
+// exists precisely so a team needs no flags at the moment a robot changed.
+//
+// The earlier --json test missed it by always passing explicit flags, which
+// suppresses the recall notice. That is the lesson: test the invocation a
+// person actually types, not the one that is convenient to write.
+test('--json stdout is pure JSON even when paths come from recall', () => {
+  const dir = project()
+  const r = run(dir, ['status', '--json'])            // no flags: recall fires
+  assert.match(r.stderr, /using remembered inputs/, 'the courtesy still reaches a human')
+  assert.doesNotThrow(() => JSON.parse(r.stdout),
+    `status --json stdout must parse; got: ${r.stdout.slice(0, 120)}`)
+  assert.ok(!/remembered inputs/.test(r.stdout), 'and must not leak into the payload')
+})
+
+test('every --json surface returns parseable stdout', () => {
+  const dir = project()
+  run(dir, ['result', '--test', 'localization', '--pass', '--by', 'T'])
+  for (const cmd of [['status', '--json'], ['states', '--json'], ['graph', '--json'],
+                     ['tests', '--json'], ['results', '--json'], ['experiment', '--json'],
+                     ['check', '--config', 'right.xml', '--code', 'code', '--json']]) {
+    const r = run(dir, cmd)
+    assert.doesNotThrow(() => JSON.parse(r.stdout),
+      `${cmd.join(' ')} → stdout must be JSON; got: ${r.stdout.slice(0, 120)}`)
+  }
+})

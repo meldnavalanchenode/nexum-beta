@@ -26,7 +26,7 @@ const APP = fileURLToPath(new URL('..', import.meta.url))
 const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.json'), 'utf8'))
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 function robot() {
   const dir = mkdtempSync(join(tmpdir(), 'physync-stranger-'))
@@ -88,7 +88,7 @@ test('machine consumers see the same distinction', () => {
   run(dir, ['state', '--config', 'c.xml', '--code', 'code'])
   run(dir, ['predict', '--checks', 'localization', '--by', 'T'])
   run(dir, ['change', '--component', 'camera-position', '--note', 'x', '--by', 'T'])
-  const j = JSON.parse(run(dir, ['status', '--json']).out.replace(/^[^{]*/, ''))
+  const j = JSON.parse(run(dir, ['status', '--json']).stdout.replace(/^[^{]*/, ''))
   assert.equal(j.status, STATUSES.UNMAPPED)
   assert.equal(j.exit, 3)
 })

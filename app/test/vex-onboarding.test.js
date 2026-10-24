@@ -23,7 +23,7 @@ import { packEdges, RULE_PACKS } from '../src/packs.js'
 const APP = fileURLToPath(new URL('..', import.meta.url))
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 const INVENTORY = {
   format: 'physync-inventory-v1', declaredBy: 'Pranav', platform: 'vex-v5',
@@ -111,7 +111,7 @@ test('THE DOCUMENTED VEX PATH puts real evidence in question', () => {
   run(dir, ['predict', '--checks', 'drive-straight', '--by', 'Pranav'])
   run(dir, ['change', '--component', 'wheel-size', '--note', 'swapped to 4in omnis', '--by', 'Pranav'])
 
-  const j = JSON.parse(run(dir, ['status', '--declare', 'inventory.json', '--json', '--reveal']).out.replace(/^[^{]*/, ''))
+  const j = JSON.parse(run(dir, ['status', '--declare', 'inventory.json', '--json', '--reveal']).stdout.replace(/^[^{]*/, ''))
   const actions = j.revalidation.required.map((r) => r.action)
   assert.ok(actions.includes('calibration:drive-distance'), `expected the calibration, got ${actions.join(', ')}`)
   assert.ok(actions.includes('test:drive-straight'), 'AND the test that consumed it — the propagation this fixes')

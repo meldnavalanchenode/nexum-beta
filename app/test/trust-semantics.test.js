@@ -28,7 +28,7 @@ const APP = fileURLToPath(new URL('..', import.meta.url))
 const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.json'), 'utf8'))
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 
 /** A set-up robot at V1 with a recorded PASS, rules approved. */
@@ -45,7 +45,7 @@ function atV1() {
 }
 const v1 = (dir) => JSON.parse(readFileSync(join(dir, '.physync/states/V1.json'), 'utf8'))
 const statusJson = (dir) =>
-  JSON.parse(run(dir, ['status', '--json', '--reveal']).out.replace(/^[^{]*/, ''))
+  JSON.parse(run(dir, ['status', '--json', '--reveal']).stdout.replace(/^[^{]*/, ''))
 
 test('PROMISE 1 — a historical PASS stays PASS, even after the change that invalidates it', () => {
   const dir = atV1()

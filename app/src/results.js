@@ -1,7 +1,7 @@
 // Test definitions + results ledger + regression detection — Phase 4.
 //
-// PHYSYNC does not execute behavioral tests. A grasp test happens on a bench,
-// run by a person; PHYSYNC's jobs are the honest ones around it:
+// Nexum does not execute behavioral tests. A grasp test happens on a bench,
+// run by a person; Nexum's jobs are the honest ones around it:
 //   define    what tests exist, which KIND they are (validation | robustness),
 //             and what threshold a human chose — thresholds are engineering
 //             decisions with a name attached, never invented defaults
@@ -83,7 +83,7 @@ export function resultVerdict({ value, explicit, threshold }) {
 export function appendResult({ testId, def, value, explicit, evidence = [], recordedBy, notes, againstState, method, simulated, now }, dir = '.') {
   if (typeof testId !== 'string' || !testId.trim()) throw new Error('a result needs a test id')
   if (typeof recordedBy !== 'string' || !recordedBy.trim()) {
-    throw new Error('a result needs --by <human> — PHYSYNC does not run behavioral tests, so every result has a person behind it')
+    throw new Error('a result needs --by <human> — Nexum does not run behavioral tests, so every result has a person behind it')
   }
   if (value != null && (typeof value !== 'number' || !Number.isFinite(value))) {
     // Infinity survives a NaN check and then serializes to null in the

@@ -6,7 +6,7 @@
 // sensor still answers — and the calibration that pointed that camera at the
 // field is now worth nothing.
 //
-// So a person says so, and PHYSYNC records THAT, with its provenance intact:
+// So a person says so, and Nexum records THAT, with its provenance intact:
 //
 //   source: 'human'          never 'observed' — nothing observed this
 //   method: 'self-reported'  the method IS a person's word, and it says so

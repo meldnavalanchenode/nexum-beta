@@ -5,7 +5,7 @@
 //     one throws or reads all zeros, so liveness is REAL evidence and a
 //     non-answer after 3 retries is a FAIL.
 //   Digital and analog inputs are hub pins. A read always succeeds and an
-//     unplugged input floats to something that looks legitimate. PHYSYNC will
+//     unplugged input floats to something that looks legitimate. Nexum will
 //     NOT claim a touch sensor is connected when it cannot know: those are
 //     reported as liveness-unavailable, with the observed value as evidence.
 // Against a verified baseline the weaker signals still become useful: a value
@@ -28,7 +28,7 @@ export function parseRobotReport(input) {
   const raw = typeof input === 'string' ? JSON.parse(input) : input
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('not a robot report object')
   if (raw.physyncRobot !== 1) {
-    throw new Error('missing "physyncRobot": 1 — is this the file the PHYSYNC Preflight OpMode wrote to /sdcard/FIRST/? (an older OpMode build wrote a report without this marker; re-flash the current PhysyncPreflight.java)')
+    throw new Error('missing "physyncRobot": 1 — is this the file the Nexum Preflight OpMode wrote to /sdcard/FIRST/? (an older OpMode build wrote a report without this marker; re-flash the current PhysyncPreflight.java)')
   }
   const sensors = []
   const seen = new Set()
@@ -44,7 +44,7 @@ export function parseRobotReport(input) {
     }
     // Duplicate names make the baseline ambiguous: it recorded both entries and
     // then false-FAILed the very same report on re-run.
-    if (seen.has(s.name)) throw new Error(`sensor "${s.name}" appears more than once — the configuration has duplicate names, which PHYSYNC's config check reports separately`)
+    if (seen.has(s.name)) throw new Error(`sensor "${s.name}" appears more than once — the configuration has duplicate names, which Nexum's config check reports separately`)
     seen.add(s.name)
     // A hub pin's liveness is never determinable, whatever the report claims —
     // this is the guarantee that digital/analog can never reach FAIL.
@@ -160,7 +160,7 @@ export function analyzeSensors(report) {
         'sensor-liveness-unavailable',
         `"${s.name}" (${s.type}, ${s.class}) read ${s.value} — liveness cannot be determined for ${s.class} pins`,
         [`robot report: ${s.name}`],
-        `A ${s.class} input reads a value whether or not anything is plugged in, so PHYSYNC will not claim this device is connected. To verify it by hand: press/trigger it and watch this value change between two runs.`,
+        `A ${s.class} input reads a value whether or not anything is plugged in, so Nexum will not claim this device is connected. To verify it by hand: press/trigger it and watch this value change between two runs.`,
       ))
     }
   }

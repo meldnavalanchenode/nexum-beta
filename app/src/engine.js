@@ -135,7 +135,7 @@ export function reconcile(config, code) {
         'unknown-device-type',
         `"${d.name}" (${d.type}) — unrecognized device type, excluded from port-collision checks`,
         [`config line ${d.line}`],
-        'Verify its port by hand this once; report the tag so the next PHYSYNC release can classify it.',
+        'Verify its port by hand this once; report the tag so the next Nexum release can classify it.',
       ))
     }
   }
@@ -234,7 +234,7 @@ export function reconcile(config, code) {
     }
   }
 
-  // 10b. Servo command checks. PHYSYNC cannot know a mechanism's PHYSICAL safe
+  // 10b. Servo command checks. Nexum cannot know a mechanism's PHYSICAL safe
   //      range — that is mechanical reality it can't see. What it can catch is
   //      values that are illegal on their face, arguments that would throw, and
   //      a code/config class contradiction.
@@ -322,7 +322,7 @@ export function reconcile(config, code) {
 
   // 11. dynamic-name — what static analysis cannot verify, said out loud.
   for (const d of dynamic) {
-    findings.push(finding('dynamic-name', `Runtime-built device name: ${d.expr}`, [`${d.file}:${d.line}`], 'Verify this lookup on the robot — PHYSYNC cannot check it statically.'))
+    findings.push(finding('dynamic-name', `Runtime-built device name: ${d.expr}`, [`${d.file}:${d.line}`], 'Verify this lookup on the robot — Nexum cannot check it statically.'))
   }
 
   // 11b. blocks-name-unknown — stale Blocks identifiers (WARN by design; the

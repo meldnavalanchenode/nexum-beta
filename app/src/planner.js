@@ -182,7 +182,7 @@ export function actionFor(nodeId) {
     return { action: 'check', label: 'physync check (config↔code reconciliation)' }
   }
   if (nodeId === 'inventory-declared') {
-    // Nothing PHYSYNC runs re-derives this. A person wrote the list; a person
+    // Nothing Nexum runs re-derives this. A person wrote the list; a person
     // has to walk the robot and confirm the list still matches it.
     return { action: 'declare', label: 'confirm the declared inventory against the physical robot, then save a new state with --declare' }
   }

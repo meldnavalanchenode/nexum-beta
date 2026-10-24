@@ -23,9 +23,9 @@ const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.js
 
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
-const statusJson = (dir) => JSON.parse(run(dir, ['status', '--config', 'robot.xml', '--code', 'code', '--json']).out.replace(/^[^{]*/, ''))
+const statusJson = (dir) => JSON.parse(run(dir, ['status', '--config', 'robot.xml', '--code', 'code', '--json']).stdout.replace(/^[^{]*/, ''))
 
 /** A sandbox with the demo staged and V1 saved. prefold=true records the
  *  spec's V1 evidence (camera-pose calibration + localization PASS) first, so
@@ -229,7 +229,7 @@ test('THE ARC: V1 → human report → inert pack → approval → owed rechecks
   assert.equal(j.status, 'REVALIDATION REQUIRED')                   // 5. current state demands work
 
   // the dependency path is visible: report → calibration → localization
-  const g = JSON.parse(run(dir, ['graph', '--json']).out.replace(/^[^{]*/, ''))
+  const g = JSON.parse(run(dir, ['graph', '--json']).stdout.replace(/^[^{]*/, ''))
   const approved = g.custom.filter((e) => e.status === 'approved')
   assert.ok(approved.some((e) => e.from === 'camera-position' && e.to === 'calibration:camera-pose'))
   assert.ok(approved.some((e) => e.from === 'calibration:camera-pose' && e.to === 'test:localization'))

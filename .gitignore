@@ -27,3 +27,13 @@ physync-report.md
 
 node_modules/
 .DS_Store
+
+# Agent + editor context files. Never distributed: they carry working notes,
+# internal reasoning and sometimes paths from the author's machine.
+CLAUDE.md
+.claude/
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-instructions.md
+AGENTS.md

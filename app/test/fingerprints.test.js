@@ -24,7 +24,7 @@ const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.js
 
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 const HUB = { address: 173, parent: true, firmware: 'HW: 20, Maj: 1, Min: 8, Eng: 2', volts: 12.8 }
 const FP_IMU = { id: 'imu-gravity', method: 'imu-gravity-rest', values: { pitchDeg: 0.5, rollDeg: -0.3 } }
@@ -49,7 +49,7 @@ function workspace({ defs = DEFS } = {}) {
   assert.equal(saved.code, 0, `V1 must save: ${saved.out}`)
   return dir
 }
-const statusJson = (dir) => JSON.parse(run(dir, ['status', '--config', 'robot.xml', '--code', 'code', '--robot', 'rob.json', '--json']).out.replace(/^[^{]*/, ''))
+const statusJson = (dir) => JSON.parse(run(dir, ['status', '--config', 'robot.xml', '--code', 'code', '--robot', 'rob.json', '--json']).stdout.replace(/^[^{]*/, ''))
 
 // ── the report door ────────────────────────────────────────────────────────
 test('malformed fingerprints are refused: non-finite values, empty values, bad ids, duplicates', () => {

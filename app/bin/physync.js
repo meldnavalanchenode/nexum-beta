@@ -20,13 +20,15 @@ import { parseStimulusReport, toStimulusBaseline, analyzeStimulus, diffStimulus,
 import { parseRobotReport, toSensorBaseline, analyzeSensors, diffSensors, validateSensorBaseline } from '../src/sensors.js'
 import { buildApproval, validateApproval, compareApproval, verifyManifestHmac, newGateKey } from '../src/approval.js'
 import { checkMeta } from '../src/registry.js'
-import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode, STATUSES, rederivedFrom } from '../src/state.js'
+import { buildVerifiedState, saveState, listStates, latestState, nextVersion, migrateLegacy, detectChanges, deploymentStatus, statusExitCode, STATUSES, rederivedFrom , assertLedgerIntact} from '../src/state.js'
 import { loadGraph, saveGraph, validateEdge, effectiveEdges } from '../src/graph.js'
 import { assertNotNestedProject } from '../src/state.js'
 import { assess, foldResults } from '../src/assess.js'
 import { assertTrialActive, startTrial, trialNotice } from '../src/trial.js'
+import { renderCycle, diffStates, cycleApplicability } from '../src/cycle.js'
+import { writeAtomic } from '../src/io.js'
 import { plan, APPLICABILITY } from '../src/planner.js'
-import { loadReported, recordReported } from '../src/reported.js'
+import { loadReported, asChange, recordReported } from '../src/reported.js'
 import { predict, debrief, assignVerdict, closeExperiment, listExperiments } from '../src/experiment.js'
 import { loadTests, saveTests, validateTestDef, appendResult, loadResults, detectRegressions, TESTS_FILE } from '../src/results.js'
 import { loadFingerprintDefs } from '../src/fingerprints.js'
@@ -85,11 +87,23 @@ const num = (name) => {
 // thing anyone does after setup. A command a user cannot run is worse than no
 // command: it reads as the tool being broken on contact.
 const SELF = (() => {
+  // A wrapper script can say how it was invoked. Without this, a shim that
+  // execs us by absolute path makes every "next, run …" hint quote that path —
+  // which in one case printed a /var/folders/… temp directory back at the user.
+  // argv[0]-style self-naming is the standard fix; an env var is the portable
+  // version of it. Only a bare token is accepted, so nothing can inject a
+  // whole command line into our own instructions.
+  const told = (process.env.NEXUM_INVOKED_AS ?? '').trim()
+  if (told && told.length <= 64 && !/[\s;&|`$<>(){}'"\\]/.test(told)) return told
+
   const argv1 = process.argv[1] ?? ''
   const base = basename(argv1)
   if (base === 'physync' || base === 'nexum') return base    // installed on PATH
   const rel = relative(process.cwd(), argv1)                 // invoked as `node <path>`
-  return 'node ' + (rel && !rel.startsWith('..') ? rel : argv1)
+  // An absolute path outside the cwd is noise at best and a leaked temp
+  // directory at worst; the bare filename is what the reader can act on.
+  if (rel && !rel.startsWith('..')) return 'node ' + rel
+  return base ? 'node ' + base : 'node ' + argv1
 })()
 
 const usage = `usage:
@@ -122,6 +136,7 @@ const usage = `usage:
   physync debrief  --checked "a, b" [--notes <text>] --by <name>    (after the work: what actually happened; deltas computed, never a verdict)
   physync verdict  --verdict HELPED|"NO VALUE"|"EXTRA WORK"|MISSED|AMBIGUOUS --basis <protocol rule> --by <name>
   physync experiment [--json]                                  (list shadow-mode records)
+  physync report [--exp <id>] [--out change-event.md]          (write up one change cycle as markdown)
   physync pull [--host 192.168.43.1:5555] [--out pulled/]`
 function die(msg) { console.error(msg); process.exit(1) }
 
@@ -196,6 +211,7 @@ const KNOWN_FLAGS = {
   experiment: ['json'],
   init: ['config', 'code', 'declare', 'by', 'pack', 'json'],
   pull: ['host', 'out'],
+  report: ['exp', 'out', 'json'],
 }
 
 // Remembered inputs — after the first explicit run, `status`/`state` work
@@ -228,7 +244,13 @@ const reuseRememberedInputs = () => {
     if (rem[k] && existsSync(rem[k])) { args.push(`--${k}`, rem[k]); reused.push(`--${k} ${rem[k]}`) }
     else if (rem[k]) moved.push([k, rem[k]])
   }
-  if (reused.length) console.log(`  (using remembered inputs: ${reused.join(' · ')} — pass flags to override)`)
+  // stderr, never stdout: this is a courtesy to a human, and `--json`'s stdout
+  // is a machine contract. Emitting it on stdout made `status --json` with no
+  // flags — the single most natural way to script Nexum, since recall exists
+  // precisely so you need no flags — return something that is not JSON.
+  if (reused.length) {
+    console.error(`  (using remembered inputs: ${reused.join(' · ')} — pass flags to override)`)
+  }
   // A remembered path that no longer resolves used to fall through to a
   // 25-line usage dump — in the exact mid-panic moment the zero-flag command
   // exists to serve. Say what moved, and what to type.
@@ -666,7 +688,7 @@ if (cmd === 'approve') {
       die(`Cannot read robot report: ${e.message}`)
     }
     if (!Array.isArray(robot.hubs) || robot.hubs.length === 0) {
-      die('That robot report contains no hub census — re-run the PHYSYNC Preflight OpMode and pull a fresh physync-robot.json.')
+      die('That robot report contains no hub census — re-run the Nexum Preflight OpMode and pull a fresh physync-robot.json.')
     }
     // "Tested and approved" cannot mean "while holding a report that shows
     // the robot broken." If the very report supplying the hub census carries
@@ -785,7 +807,7 @@ if (cmd === 'gate') {
       } catch (e) {
         die(`Cannot read robot report: ${e.message}`)
       }
-      // The verdict is exactly as fresh as this file. PHYSYNC cannot know
+      // The verdict is exactly as fresh as this file. Nexum cannot know
       // when it was written (the hub has no trustworthy clock), so it says
       // so instead of implying a live reading.
       console.error('⚠ Verdict is as of the moment that robot report was written — for a fresh verdict, re-run the Preflight OpMode and pull a fresh physync-robot.json.')
@@ -816,7 +838,7 @@ if (cmd === 'state') {
   // Save the next verified state — append-only, never overwrites history.
   //
   // Two doors in. --config is the FTC one: a real configuration file off a real
-  // hub, reconciled against real source. --declare is for every robot PHYSYNC
+  // hub, reconciled against real source. --declare is for every robot Nexum
   // cannot read a configuration from (VEX V5 among them): a person writes down
   // what is on the robot, and that list is recorded as a person's claim. The
   // second door never borrows the first's evidence.
@@ -1347,7 +1369,7 @@ if (cmd === 'rules') {
       console.log(JSON.stringify({ physync: 1, packs: Object.entries(RULE_PACKS).map(([id, p]) => ({ id, label: p.label, note: p.note, edges: p.edges.length })) }, null, 2))
       process.exit(0)
     }
-    console.log('\n  RULE PACKS — candidate dependencies for a mentor to judge, never facts PHYSYNC asserts.\n')
+    console.log('\n  RULE PACKS — candidate dependencies for a mentor to judge, never facts Nexum asserts.\n')
     for (const [id, p] of Object.entries(RULE_PACKS)) {
       console.log(`    ${id}  —  ${p.label}  (${p.edges.length} edges)`)
       console.log(`        ${p.note.replace(/(.{78}\S*)\s+/g, '$1\n        ')}\n`)
@@ -1522,7 +1544,7 @@ if (cmd === 'result') {
   const entry = appendResult({
     testId, def, value, explicit,
     evidence: opt('evidence') ? [opt('evidence')] : [],
-    notes: opt('notes'), recordedBy: opt('by') ?? die('result needs --by <human> — PHYSYNC does not run behavioral tests; every result has a person behind it.'),
+    notes: opt('notes'), recordedBy: opt('by') ?? die('result needs --by <human> — Nexum does not run behavioral tests; every result has a person behind it.'),
     method: opt('method') ?? null,
     simulated: args.includes('--simulated'),
     againstState: latestState('.') ? `V${latestState('.').version}` : null,
@@ -1589,6 +1611,89 @@ if (cmd === 'pull') {
       ? 'adb not found — install Android platform-tools, or copy the config XML off the hub manually.'
       : `adb failed (${e.message}) — is the laptop on the robot's Wi-Fi? Default host is 192.168.43.1:5555.`)
   }
+}
+
+// `report` — one change cycle, written up as markdown.
+//
+// Everything it prints was already on disk in five separate files. The point is
+// not new information, it is that a team can hand someone the result without
+// handing them a folder: `ledger/CHANGE-EVENT-001.md` asks for this summary by
+// hand, at the end of a late night, which is when nobody writes anything.
+if (cmd === 'report') {
+  assertLedgerIntact('.')
+  const states = listStates('.')
+  if (!states.length) die('No verified states on record — there is no cycle to report on yet.\n  Save a baseline first: physync state --config <xml> --code <dir>')
+
+  const experiments = listExperiments('.')
+  const wantId = opt('exp')
+  let exp = null
+  if (wantId) {
+    exp = experiments.find((e) => e.id === wantId)
+      ?? die(`No experiment "${wantId}". On record: ${experiments.map((e) => e.id).join(', ') || 'none'}`)
+  } else {
+    // The most recent CLOSED cycle is the one worth writing up; an open one has
+    // no "what actually happened" half yet.
+    exp = [...experiments].reverse().find((e) => e.closedAt && !e.abandoned) ?? null
+  }
+
+  // Which state pair does this cycle span? An experiment names both ends. With
+  // no experiment, report the last transition that exists.
+  const byVersion = new Map(states.map((st) => [`V${st.version}`, st]))
+  const toState = exp?.newState ? (byVersion.get(exp.newState) ?? states[states.length - 1])
+                                : states[states.length - 1]
+  const fromState = exp?.baseline ? (byVersion.get(exp.baseline) ?? null)
+                                  : (states.length > 1 ? states[states.length - 2] : null)
+
+  // Changes between the two ends, recomputed from the records themselves rather
+  // than trusted from the experiment snapshot (which stores only labels).
+  // State-to-state, not a re-measurement: see diffStates' note on why
+  // detectChanges is the wrong tool for comparing two saved records.
+  const detected = diffStates(fromState, toState)
+  const since = fromState?.createdAt ?? null
+  const humanReported = loadReported('.').filter((r) => !since || !r.at || r.at >= since)
+  const cycleResultRows = loadResults('.').filter((r) => (!since || !r.at || r.at >= since) && r.simulated !== true)
+
+  // Applicability and the plan come from the planner, over the same graph the
+  // team approved — never recomputed with different rules for the document.
+  const { applicability, required } = cycleApplicability({
+    fromState,
+    changes: [
+      ...detected.map((c, i) => ({ ...c, id: `chg-${i + 1}`, source: 'declared', method: 'state-diff' })),
+      ...humanReported.map(asChange),
+    ],
+    graph: loadGraph('.'),
+  })
+
+  const md = renderCycle({
+    experiment: exp, fromState, toState,
+    changes: detected, reported: humanReported,
+    applicability, required, results: cycleResultRows,
+    engineVersion: ENGINE_VERSION,
+    generatedAt: new Date().toISOString(),
+  })
+
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({
+      physync: 1, experiment: exp?.id ?? null,
+      from: fromState ? `V${fromState.version}` : null,
+      to: toState ? `V${toState.version}` : null,
+      changes: detected.length, reported: humanReported.length,
+      results: cycleResultRows.length, markdown: md,
+    }, null, 2))
+    process.exit(0)
+  }
+
+  const outPath = opt('out')
+  if (outPath) {
+    writeAtomic(outPath, md)
+    console.log(`\n  Change event written → ${outPath}`)
+    console.log(`    ${fromState ? 'V' + fromState.version : '—'} → ${toState ? 'V' + toState.version : '—'} · ${detected.length} detected change(s) · ${humanReported.length} reported · ${cycleResultRows.length} result(s)`)
+    if (!exp) console.log('    No prediction was on record for this cycle — the document says so rather than omitting it.')
+    console.log('')
+  } else {
+    console.log(md)
+  }
+  process.exit(0)
 }
 
 die(usage)

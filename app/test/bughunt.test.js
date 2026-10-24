@@ -23,7 +23,7 @@ const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.js
 
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 function workspace() {
   const dir = mkdtempSync(join(tmpdir(), 'physync-hunt-'))
@@ -36,7 +36,7 @@ function workspace() {
 }
 const saveV = (dir) => run(dir, ['state', '--config', 'robot.xml', '--code', 'code'])
 const status = (dir) => run(dir, ['status', '--config', 'robot.xml', '--code', 'code', '--json'])
-const parse = (r) => JSON.parse(r.out.slice(r.out.indexOf('{')))
+const parse = (r) => JSON.parse(r.stdout.slice(r.stdout.indexOf('{')))
 
 // ── P0: digest poisoning ───────────────────────────────────────────────────
 test('stableStringify mirrors JSON.stringify undefined semantics exactly — digests can never diverge from the written file', () => {

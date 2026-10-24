@@ -9,7 +9,7 @@
 //   detect = measure and compare. Never infer. A fingerprint that was not
 //   re-measured is a GAP (stated absence), never "unchanged". A drift can
 //   only be judged against a tolerance A NAMED HUMAN authored — sensors have
-//   noise, and PHYSYNC does not invent engineering thresholds. With no
+//   noise, and Nexum does not invent engineering thresholds. With no
 //   authored tolerance, two measurements are recorded and honestly reported
 //   as NOT COMPARED.
 //

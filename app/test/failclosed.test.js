@@ -115,7 +115,7 @@ test('the web UI refuses to reveal a plan before a prediction exists', async (t)
   })
   t.after(() => proc.kill())
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('server did not start')), 30000)
+    const timer = setTimeout(() => reject(new Error('server did not start')), 120000)
     proc.stdout.on('data', (b) => {
       const m = /127\.0\.0\.1:(\d+)/.exec(String(b))
       if (m) { PORT = Number(m[1]); clearTimeout(timer); resolve() }

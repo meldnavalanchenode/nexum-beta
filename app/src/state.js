@@ -1,7 +1,7 @@
 // Versioned Verified Robot States — the Phase-2 core of the new direction.
 //
 // A verified state is an immutable, digest-protected snapshot of everything
-// PHYSYNC knew about a robot at a moment a human vouched for it: the DECLARED
+// Nexum knew about a robot at a moment a human vouched for it: the DECLARED
 // layer (config bytes, device map, code reconciliation) and the OBSERVED
 // layer (hub census, sensor liveness, stimulus results), each carried as
 // EVIDENCE items with a three-valued result:
@@ -191,7 +191,7 @@ export function buildVerifiedState({ robotId = 'robot', version, configName, con
   downgradeFrom(stimEvStart, 'stimulus')
 
   // Recorded behavioral results (validation/robustness) fold in as evidence
-  // with their human recorder — PHYSYNC never ran them, and the state says so.
+  // with their human recorder — Nexum never ran them, and the state says so.
   if (results) {
     for (const r of results) {
       ev.push(evidence(`test:${r.testId}`, r.verdict, 'human', 'recorded-result',

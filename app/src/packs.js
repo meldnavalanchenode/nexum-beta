@@ -1,6 +1,6 @@
 // Rule packs — starting points for a team's dependency graph.
 //
-// READ THIS BEFORE ADDING ONE. A pack is NOT a set of facts PHYSYNC asserts.
+// READ THIS BEFORE ADDING ONE. A pack is NOT a set of facts Nexum asserts.
 // Every edge in every pack loads with status 'proposed', which the graph layer
 // refuses to traverse. Loading a pack changes no verdict, invalidates no
 // evidence, and demands no recheck. It puts a list of *candidate* dependencies
@@ -10,7 +10,7 @@
 // The reason packs exist is narrow and practical: a team standing in a pit is
 // not going to hand-type fourteen `graph --propose` commands, and a team that
 // types none of them gets a tool that reports "no dependency mapping" forever.
-// The reason packs are PROPOSED is the whole design: PHYSYNC does not know
+// The reason packs are PROPOSED is the whole design: Nexum does not know
 // whether a camera move invalidates YOUR localization test. It knows that it
 // might, and that a human can answer it.
 //
@@ -27,7 +27,7 @@ export const RULE_PACKS = {
     note:
       'VEXcode stores device configuration inside the project and compiles it with the program, ' +
       'so a name or port mismatch between config and code is a BUILD error the toolchain already ' +
-      'catches. PHYSYNC adds nothing there. What no toolchain catches is the declaration drifting ' +
+      'catches. Nexum adds nothing there. What no toolchain catches is the declaration drifting ' +
       'from the physical robot, and the calibrations and tests that quietly depended on the old ' +
       'arrangement. That is what these edges are about.',
     edges: [
@@ -79,7 +79,7 @@ export const RULE_PACKS = {
       'A re-aimed camera changes no file: the config is byte-identical, the sensor still answers, ' +
       'and every scan comes back clean. What may no longer hold is the pose calibration performed ' +
       'through the old mount angle, and any localization or perception result validated through ' +
-      'that calibration. PHYSYNC cannot know whether YOUR localization depends on YOUR camera ' +
+      'that calibration. Nexum cannot know whether YOUR localization depends on YOUR camera ' +
       'mount — these edges are the question, proposed and inert until a mentor answers it by name.',
     edges: [
       { from: 'camera-position', to: 'calibration:camera-pose', note: 'a pose calibration maps camera pixels to field positions through the exact mount angle it was performed at — re-aim the mount and the mapping was measured on a camera that no longer exists' },
@@ -93,7 +93,7 @@ export const RULE_PACKS = {
     note:
       'The gravity-vector fingerprint measures the IMU\'s orientation with the robot at rest. Drift ' +
       'beyond an authored tolerance means the hub was re-mounted, the chassis bent, or the robot no ' +
-      'longer sits flat — PHYSYNC cannot know which, and cannot know whether YOUR heading calibration ' +
+      'longer sits flat — Nexum cannot know which, and cannot know whether YOUR heading calibration ' +
       'or localization consumed that orientation. These edges are the question, inert until a mentor ' +
       'answers it by name.',
     edges: [
@@ -106,7 +106,7 @@ export const RULE_PACKS = {
 /**
  * Expand a pack into storable custom edges. Every one comes back PROPOSED.
  * There is deliberately no option to load a pack pre-approved: a pack that
- * could approve itself would be PHYSYNC asserting engineering dependencies on
+ * could approve itself would be Nexum asserting engineering dependencies on
  * a robot it has never seen, which is the one thing this design forbids.
  */
 export function packEdges(packName) {

@@ -57,7 +57,12 @@ function boot(p) {
     port: new Promise((resolve, reject) => {
       proc.stdout.on('data', d => { const m = /127\.0\.0\.1:(\d+)/.exec(String(d)); if (m) resolve(Number(m[1])) })
       proc.on('exit', code => reject(Object.assign(new Error(`exited ${code}`), { code, out })))
-      setTimeout(() => reject(new Error('startup timeout')), 30000)
+      // 120s, not 30: this guards against a HANG, it does not assert startup
+    // speed. Under --test-concurrency=4 with millions of generated tests
+    // saturating every core, node's own boot has exceeded 30s — and because
+    // this runs in a `before` hook, one slow boot failed all 9 tests in this
+    // file, none of which are about timing.
+    setTimeout(() => reject(new Error('startup timeout')), 120000)
     }),
     text: () => out,
   }

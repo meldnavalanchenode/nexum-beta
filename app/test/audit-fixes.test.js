@@ -18,9 +18,9 @@ const APP = fileURLToPath(new URL('..', import.meta.url))
 const demo = JSON.parse(readFileSync(join(APP, 'fixtures/camera_reported_demo.json'), 'utf8'))
 const run = (dir, a) => {
   const r = spawnSync(process.execPath, [join(APP, 'bin/physync.js'), ...a], { cwd: dir, encoding: 'utf8' })
-  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') }
+  return { code: r.status, out: (r.stdout ?? '') + (r.stderr ?? ''), stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
-const statusJson = (dir, extra = []) => JSON.parse(run(dir, ['status', '--config', 'robot.xml', '--code', 'code', ...extra, '--json']).out.replace(/^[^{]*/, ''))
+const statusJson = (dir, extra = []) => JSON.parse(run(dir, ['status', '--config', 'robot.xml', '--code', 'code', ...extra, '--json']).stdout.replace(/^[^{]*/, ''))
 const appOf = (j, id) => j.revalidation?.applicability?.find((a) => a.evidenceId === id)
 
 const CONFIG = demo.configXml

@@ -60,14 +60,14 @@ export const CHECKS = [
     version: '0.1.0',
     severity: 'WARN',
     name: 'Input the parser could not confidently read',
-    why: 'PHYSYNC never drops what it cannot parse — ambiguity is surfaced, not buried (the audit-engine rule).',
+    why: 'Nexum never drops what it cannot parse — ambiguity is surfaced, not buried (the audit-engine rule).',
   },
   {
     id: 'port-range',
     version: '0.1.0',
     severity: 'FAIL',
     name: 'Port outside the hub\'s physical range',
-    why: 'REV hubs have motor 0-3, servo 0-5, digital 0-7, analog 0-3, I2C bus 0-3. Impossible ports come from hand-edited XML — a workflow PHYSYNC itself recommends during swap recovery.',
+    why: 'REV hubs have motor 0-3, servo 0-5, digital 0-7, analog 0-3, I2C bus 0-3. Impossible ports come from hand-edited XML — a workflow Nexum itself recommends during swap recovery.',
   },
   {
     id: 'unknown-device-type',
@@ -109,7 +109,7 @@ export const CHECKS = [
     version: '0.1.0',
     severity: 'FAIL',
     name: 'Servo commanded to a position outside 0.0–1.0',
-    why: 'The SDK clamps silently, so the servo stops somewhere the programmer did not intend while the code reads as if it worked. PHYSYNC cannot know your mechanism\'s physical safe range, but a value outside the legal range is wrong on its face.',
+    why: 'The SDK clamps silently, so the servo stops somewhere the programmer did not intend while the code reads as if it worked. Nexum cannot know your mechanism\'s physical safe range, but a value outside the legal range is wrong on its face.',
   },
   {
     id: 'servo-scale-range-invalid',
@@ -123,7 +123,7 @@ export const CHECKS = [
     version: '0.1.0',
     severity: 'FAIL',
     name: 'Config device type and the code\'s servo class contradict each other',
-    why: 'A continuous-rotation servo has no positions and a positional servo has no power. Either mismatch throws at runtime — a config/code disagreement of exactly the kind PHYSYNC exists to catch.',
+    why: 'A continuous-rotation servo has no positions and a positional servo has no power. Either mismatch throws at runtime — a config/code disagreement of exactly the kind Nexum exists to catch.',
   },
   {
     id: 'sensor-not-responding',
@@ -242,7 +242,7 @@ export const CHECKS = [
     version: '0.1.0',
     severity: 'FAIL',
     name: 'Approval signature does not verify with this laptop\'s gate key',
-    why: 'The manifest was not produced by this laptop\'s `physync approve` (or the key changed). Provenance only — the HMAC proves which laptop signed it, not that the robot is safe, and PHYSYNC never claims more than that.',
+    why: 'The manifest was not produced by this laptop\'s `physync approve` (or the key changed). Provenance only — the HMAC proves which laptop signed it, not that the robot is safe, and Nexum never claims more than that.',
   },
   {
     id: 'approval-signature-unverified',
@@ -263,7 +263,7 @@ export const CHECKS = [
     version: '0.1.0',
     severity: 'INFO',
     name: 'Device name built at runtime — cannot be verified statically',
-    why: 'Loops like get(Type.class, "module" + i + "_motor") are real (swerve, odometry); PHYSYNC reports what it cannot check instead of guessing.',
+    why: 'Loops like get(Type.class, "module" + i + "_motor") are real (swerve, odometry); Nexum reports what it cannot check instead of guessing.',
   },
 ]
 

@@ -1,18 +1,18 @@
-// A hand-declared device inventory — the declared layer for robots PHYSYNC
+// A hand-declared device inventory — the declared layer for robots Nexum
 // cannot read a configuration file from.
 //
-// WHY THIS EXISTS. PHYSYNC's declared layer was built on one thing: an FTC
+// WHY THIS EXISTS. Nexum's declared layer was built on one thing: an FTC
 // Robot Controller configuration XML, parsed byte-for-byte off the hub. That
 // file is the reason `physync check` can reconcile config against code. VEX V5
 // has no such artifact to parse — VEXcode stores device configuration inside
 // the project and compiles it with the program, so a name mismatch is a build
-// error the toolchain already catches. There is nothing there for PHYSYNC to
+// error the toolchain already catches. There is nothing there for Nexum to
 // reconcile, and pretending otherwise would be inventing work.
 //
 // What VEX does NOT catch — what no toolchain catches — is the declaration
 // drifting from the physical robot: the port label says 1 and the wire is in
 // 11, the motor is declared reversed and is not, the mount moved and the
-// calibration behind it is now worthless. That half is PHYSYNC's whole subject,
+// calibration behind it is now worthless. That half is Nexum's whole subject,
 // and it needs exactly one thing from the platform: a list of what the team
 // says is on the robot.
 //
@@ -30,7 +30,7 @@ export const INVENTORY_FORMAT = 'physync-inventory-v1'
 
 /**
  * Port shapes we know how to sanity-check. These are the ONLY hard-coded
- * platform facts in PHYSYNC, they are advisory (they produce warnings, never
+ * platform facts in Nexum, they are advisory (they produce warnings, never
  * refusals), and they are listed here so a wrong one is a one-line fix rather
  * than a hunt. `null` means "this platform's ports are not range-checked".
  */
@@ -44,7 +44,7 @@ export const PLATFORMS = {
     defaultBus: 'smart',
   },
   // A deliberate escape hatch: any robot, no port rules. Used by teams on
-  // platforms nobody has taught PHYSYNC about, and by tests.
+  // platforms nobody has taught Nexum about, and by tests.
   generic: {
     label: 'unspecified platform',
     buses: { generic: { label: 'port', test: () => true, hint: '' } },
@@ -60,7 +60,7 @@ const NAME_RE = /^[A-Za-z_][\w]*$/
  * Refusals are structural only — things that would make the record ambiguous
  * or make a later lookup wrong. Anything that is merely UNFAMILIAR (a device
  * type nobody taught us, a port outside the documented range) comes back as a
- * warning, because refusing a team's real robot over PHYSYNC's incomplete
+ * warning, because refusing a team's real robot over Nexum's incomplete
  * knowledge of VEX would be the tool asserting more than it knows.
  *
  * @returns {{format, platform, platformLabel, robotId, declaredBy, note, devices, warnings}}
@@ -133,7 +133,7 @@ export function parseInventory(text, { filename = 'inventory' } = {}) {
 
     // Advisory, never fatal: our port map may simply be out of date.
     if (!busSpec.test(port)) {
-      warnings.push(`"${name}" is on ${busSpec.label} ${port}${busSpec.hint ? ` — ${busSpec.hint}` : ''}. Check it, or ignore this if PHYSYNC's port map is wrong for your brain.`)
+      warnings.push(`"${name}" is on ${busSpec.label} ${port}${busSpec.hint ? ` — ${busSpec.hint}` : ''}. Check it, or ignore this if Nexum's port map is wrong for your brain.`)
     }
 
     devices.push({
