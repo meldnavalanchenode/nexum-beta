@@ -73,7 +73,15 @@ export function componentsOf(change) {
     case 'config-changed':
     case 'config-renamed':
       return ['configuration']
-    case 'device-added':
+    case 'device-added': {
+      // An addition touches `device:<n>` like any other device change, AND a
+      // second component id of its own. That is what lets a rule apply only to
+      // additions: edges cannot see change kinds, and `$n` targets are expanded
+      // by substitution rather than looked up, so filtering anywhere else
+      // (universe admission, for instance) does nothing at all.
+      const n = change.component.match(/"([^"]+)"/)?.[1] ?? change.component
+      return [`device:${n}`, `device-added:${n}`]
+    }
     case 'device-removed':
     case 'device-type-changed':
     case 'device-port-moved':
@@ -196,6 +204,19 @@ export function actionFor(nodeId) {
   }
   if (nodeId.startsWith('motor-response:') || nodeId.startsWith('servo-response:')) {
     return { action: 'stimulus', label: 'confirm by hand that these actuators still move as expected, wheels off the ground (or supply a fresh stimulus report)' }
+  }
+  if (nodeId.startsWith('device-verified:')) {
+    // The action is deliberately a `test:` so the EXISTING satisfaction path
+    // applies: assess.js only clears `test:` and `calibration:` requirements
+    // from recorded results, so any other prefix would have produced a demand
+    // no team could ever discharge — permanent noise, which is worse than the
+    // silence this rule exists to fix. `result --test device-<name>` clears it,
+    // and the requirement prints that exact command.
+    const name = nodeId.slice('device-verified:'.length)
+    return {
+      action: `test:device-${name}`,
+      label: `confirm the newly declared device "${name}" is present and does what the code expects`,
+    }
   }
   if (nodeId.startsWith('calibration:')) {
     return { action: `calibration:${nodeId.slice('calibration:'.length)}`, label: `redo calibration "${nodeId.slice('calibration:'.length)}"` }

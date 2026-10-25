@@ -48,6 +48,14 @@ export const BUILTIN_EDGES = [
   // and inert until a human approves them.
   { id: 'generic:inventory-declare', from: 'configuration', to: 'inventory-declared', source: 'deterministic-rule', note: 'the declaration changed, so it no longer describes the robot a person vouched for' },
   { id: 'generic:device-inventory', from: 'device:$n', to: 'inventory-declared', source: 'deterministic-rule', note: 'a changed device entry invalidates the inventory that contained the old one' },
+  // A device that was not in the previous state has no evidence of any kind
+  // attached to it — not a guess about the robot, a fact about the ledger. The
+  // per-device edges below cannot produce this: their targets contain $n, which
+  // the planner's universe filter excludes, so they can only ever INVALIDATE
+  // evidence that already exists. Adding a motor therefore used to demand
+  // nothing at all, which is the first thing a new team does and the first
+  // thing they saw Nexum say nothing about.
+  { id: 'ftc:device-new', from: 'device-added:$n', to: 'device-verified:$n', source: 'deterministic-rule', note: 'a device entry that did not exist before has no recorded evidence that the physical device is present or behaves as the code expects' },
   { id: 'ftc:device-motor', from: 'device:$n', to: 'motor-response:$n', source: 'deterministic-rule', note: 'a changed motor entry (port/type) invalidates that motor\'s measured response' },
   { id: 'ftc:device-servo', from: 'device:$n', to: 'servo-response:$n', source: 'deterministic-rule', note: 'a changed servo entry invalidates that servo\'s confirmed response' },
   { id: 'ftc:device-sensor', from: 'device:$n', to: 'sensor-liveness:$n', source: 'deterministic-rule', note: 'a changed sensor entry invalidates that sensor\'s liveness evidence' },
